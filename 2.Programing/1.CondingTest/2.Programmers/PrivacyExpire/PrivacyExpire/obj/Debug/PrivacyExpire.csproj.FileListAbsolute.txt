@@ -1,0 +1,7 @@
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\bin\Debug\PrivacyExpire.exe.config
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\bin\Debug\PrivacyExpire.exe
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\bin\Debug\PrivacyExpire.pdb
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\obj\Debug\PrivacyExpire.csprojAssemblyReference.cache
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\obj\Debug\PrivacyExpire.csproj.CoreCompileInputs.cache
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\obj\Debug\PrivacyExpire.exe
+D:\workspace\Git\MY_GITHUB\2.Programing\1.CondingTest\2.Programmers\PrivacyExpire\PrivacyExpire\obj\Debug\PrivacyExpire.pdb
