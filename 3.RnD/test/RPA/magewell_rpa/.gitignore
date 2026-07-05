@@ -1,0 +1,18 @@
+# 대용량 문서 덤프 (6GB, git 부적합)
+MiTx/
+
+# 가상환경
+.venv/
+
+# 파이썬 캐시/빌드
+__pycache__/
+*.pyc
+*.pyo
+obj/
+x64/
+
+# 대용량 미디어
+*.avi
+*.mp4
+*.mov
+*.mkv

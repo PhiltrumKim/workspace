@@ -1,0 +1,266 @@
+[
+  {
+    "name": "wastebasket",
+    "target": [
+      110,
+      122
+    ],
+    "actual": [
+      117,
+      128
+    ],
+    "err": [
+      7,
+      6
+    ],
+    "dist": 9.2,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "menu_btn",
+    "target": [
+      1074,
+      66
+    ],
+    "actual": [
+      1080,
+      72
+    ],
+    "err": [
+      6,
+      6
+    ],
+    "dist": 8.5,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "browser_icon",
+    "target": [
+      1164,
+      67
+    ],
+    "actual": [
+      1170,
+      73
+    ],
+    "err": [
+      6,
+      6
+    ],
+    "dist": 8.5,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "filemgr_icon",
+    "target": [
+      1205,
+      67
+    ],
+    "actual": null,
+    "err": null,
+    "dist": null,
+    "score": 1.0,
+    "pass": false
+  },
+  {
+    "name": "term_taskbar",
+    "target": [
+      1450,
+      66
+    ],
+    "actual": [
+      1360,
+      49
+    ],
+    "err": [
+      -90,
+      -17
+    ],
+    "dist": 91.6,
+    "score": 0.991,
+    "pass": false
+  },
+  {
+    "name": "cpu_pct",
+    "target": [
+      1791,
+      66
+    ],
+    "actual": [
+      1790,
+      64
+    ],
+    "err": [
+      -1,
+      -2
+    ],
+    "dist": 2.2,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "clock",
+    "target": [
+      1843,
+      66
+    ],
+    "actual": [
+      1849,
+      72
+    ],
+    "err": [
+      6,
+      6
+    ],
+    "dist": 8.5,
+    "score": 0.691,
+    "pass": true
+  },
+  {
+    "name": "term_titlebar",
+    "target": [
+      653,
+      361
+    ],
+    "actual": [
+      652,
+      359
+    ],
+    "err": [
+      -1,
+      -2
+    ],
+    "dist": 2.2,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "term_min_btn",
+    "target": [
+      1227,
+      359
+    ],
+    "actual": [
+      1234,
+      366
+    ],
+    "err": [
+      7,
+      7
+    ],
+    "dist": 9.9,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "term_max_btn",
+    "target": [
+      1251,
+      359
+    ],
+    "actual": [
+      1258,
+      366
+    ],
+    "err": [
+      7,
+      7
+    ],
+    "dist": 9.9,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "term_close_btn",
+    "target": [
+      1275,
+      359
+    ],
+    "actual": [
+      1249,
+      357
+    ],
+    "err": [
+      -26,
+      -2
+    ],
+    "dist": 26.1,
+    "score": 1.0,
+    "pass": false
+  },
+  {
+    "name": "menu_File",
+    "target": [
+      652,
+      389
+    ],
+    "actual": [
+      651,
+      387
+    ],
+    "err": [
+      -1,
+      -2
+    ],
+    "dist": 2.2,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "menu_Edit",
+    "target": [
+      692,
+      389
+    ],
+    "actual": [
+      691,
+      387
+    ],
+    "err": [
+      -1,
+      -2
+    ],
+    "dist": 2.2,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "menu_Tabs",
+    "target": [
+      738,
+      389
+    ],
+    "actual": [
+      737,
+      387
+    ],
+    "err": [
+      -1,
+      -2
+    ],
+    "dist": 2.2,
+    "score": 1.0,
+    "pass": true
+  },
+  {
+    "name": "menu_Help",
+    "target": [
+      786,
+      389
+    ],
+    "actual": [
+      785,
+      387
+    ],
+    "err": [
+      -1,
+      -2
+    ],
+    "dist": 2.2,
+    "score": 1.0,
+    "pass": true
+  }
+]

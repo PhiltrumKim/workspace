@@ -1,0 +1,26 @@
+{
+  "name": "click_menu_01",
+  "goal": "menu_btn > menu_01 클릭",
+  "steps": [
+    {
+      "action": "click",
+      "object": "menu_btn"
+    },
+    {
+      "action": "wait",
+      "sec": 0.5
+    },
+    {
+      "action": "click",
+      "object": "menu_01"
+    },
+    {
+      "action": "wait",
+      "sec": 0.6
+    },
+    {
+      "action": "screenshot",
+      "label": "result"
+    }
+  ]
+}

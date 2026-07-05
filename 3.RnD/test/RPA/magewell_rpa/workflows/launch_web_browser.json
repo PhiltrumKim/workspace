@@ -1,0 +1,30 @@
+{
+  "name": "launch_web_browser",
+  "goal": "Menu > Internet > Web Browser 자동 실행",
+  "steps": [
+    {
+      "action": "click",
+      "object": "menu_btn"
+    },
+    {
+      "action": "wait",
+      "sec": 0.6
+    },
+    {
+      "action": "click",
+      "object": "menu_01"
+    },
+    {
+      "action": "wait",
+      "sec": 0.6
+    },
+    {
+      "action": "click",
+      "object": "internet_02"
+    },
+    {
+      "action": "wait",
+      "sec": 1.0
+    }
+  ]
+}

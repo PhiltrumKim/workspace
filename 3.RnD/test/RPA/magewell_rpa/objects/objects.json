@@ -1,0 +1,162 @@
+{
+  "menu_btn": {
+    "file": "menu_btn.png",
+    "w": 62,
+    "h": 27,
+    "kind": "launcher",
+    "note": "메인 메뉴 버튼"
+  },
+  "menu_00": {
+    "file": "menu_00.png",
+    "w": 218,
+    "h": 21,
+    "kind": "menu_item",
+    "click": [
+      157,
+      103
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_01": {
+    "file": "menu_01.png",
+    "w": 218,
+    "h": 35,
+    "kind": "menu_item",
+    "click": [
+      157,
+      138
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_02": {
+    "file": "menu_02.png",
+    "w": 218,
+    "h": 33,
+    "kind": "menu_item",
+    "click": [
+      157,
+      176
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_03": {
+    "file": "menu_03.png",
+    "w": 218,
+    "h": 30,
+    "kind": "menu_item",
+    "click": [
+      157,
+      214
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_04": {
+    "file": "menu_04.png",
+    "w": 218,
+    "h": 34,
+    "kind": "menu_item",
+    "click": [
+      157,
+      250
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_05": {
+    "file": "menu_05.png",
+    "w": 218,
+    "h": 34,
+    "kind": "menu_item",
+    "click": [
+      157,
+      288
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_06": {
+    "file": "menu_06.png",
+    "w": 218,
+    "h": 30,
+    "kind": "menu_item",
+    "click": [
+      157,
+      331
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_07": {
+    "file": "menu_07.png",
+    "w": 218,
+    "h": 27,
+    "kind": "menu_item",
+    "click": [
+      157,
+      375
+    ],
+    "has_submenu": true,
+    "from": "menu_btn"
+  },
+  "menu_08": {
+    "file": "menu_08.png",
+    "w": 218,
+    "h": 36,
+    "kind": "menu_item",
+    "click": [
+      157,
+      419
+    ],
+    "has_submenu": false,
+    "from": "menu_btn"
+  },
+  "menu_09": {
+    "file": "menu_09.png",
+    "w": 218,
+    "h": 37,
+    "kind": "menu_item",
+    "click": [
+      157,
+      462
+    ],
+    "has_submenu": false,
+    "from": "menu_btn"
+  },
+  "internet_00": {
+    "file": "internet_00.png",
+    "w": 248,
+    "h": 35,
+    "kind": "menu_item",
+    "click": [
+      392,
+      139
+    ],
+    "from": "menu_01"
+  },
+  "internet_01": {
+    "file": "internet_01.png",
+    "w": 248,
+    "h": 36,
+    "kind": "menu_item",
+    "click": [
+      392,
+      176
+    ],
+    "from": "menu_01"
+  },
+  "internet_02": {
+    "file": "internet_02.png",
+    "w": 248,
+    "h": 24,
+    "kind": "menu_item",
+    "click": [
+      392,
+      218
+    ],
+    "from": "menu_01"
+  }
+}
