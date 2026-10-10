@@ -43,6 +43,10 @@ python -m ghost add-target ok_btn --image shot.png --box 860,600,200,60   # targ
 python -m ghost run scenarios/my_job.json
 ```
 
+실장비 예제: `scenarios/notepad_hello.json` (Win7 대상, target 은 `objects/`)
+— Win+R → 메모장 실행 → 입력 → Alt+F4 → "저장 안 함" 클릭. 각 단계는 expect 로 화면 확인 (2026-10-10 4/4 성공).
+대상 화면의 target 은 해상도·테마·창 위치에 의존하므로 대상 PC 가 바뀌면 다시 캡처해 등록한다.
+
 설정은 `ghost.json` (COM 포트, 카메라 번호, 해상도, 경로). 기본값은 `ghost/config.py`.
 `--sim` 실행 시에는 `ghost.json` 의 `"sim"` 섹션이 덧씌워진다.
 

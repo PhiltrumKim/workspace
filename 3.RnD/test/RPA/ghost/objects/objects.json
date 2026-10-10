@@ -1,0 +1,52 @@
+{
+  "run_prompt": {
+    "file": "run_prompt.png",
+    "w": 365,
+    "h": 24,
+    "threshold": 0.9,
+    "hint": [
+      197,
+      890
+    ]
+  },
+  "run_ok": {
+    "file": "run_ok.png",
+    "w": 84,
+    "h": 22,
+    "threshold": 0.9,
+    "hint": [
+      176,
+      1005
+    ]
+  },
+  "notepad_title": {
+    "file": "notepad_title.png",
+    "w": 122,
+    "h": 18,
+    "threshold": 0.85,
+    "hint": [
+      352,
+      230
+    ]
+  },
+  "save_prompt": {
+    "file": "save_prompt.png",
+    "w": 322,
+    "h": 22,
+    "threshold": 0.9,
+    "hint": [
+      946,
+      473
+    ]
+  },
+  "dont_save_btn": {
+    "file": "dont_save_btn.png",
+    "w": 103,
+    "h": 21,
+    "threshold": 0.9,
+    "hint": [
+      987,
+      531
+    ]
+  }
+}

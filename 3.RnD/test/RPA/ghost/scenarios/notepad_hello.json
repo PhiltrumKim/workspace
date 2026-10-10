@@ -1,0 +1,19 @@
+{
+  "ghost": 1,
+  "name": "notepad_hello",
+  "description": "메모장 실행 → 문장 입력 → 저장 없이 종료. 각 단계마다 화면(target)으로 결과 확인 (Win7 대상, 영문 IME)",
+  "steps": [
+    { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창 열기",
+      "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+    { "action": "type", "text": "notepad" },
+    { "action": "key", "key": "enter", "label": "메모장 실행",
+      "expect": { "visible": "notepad_title", "timeout": 10 } },
+    { "action": "type", "text": "Hello from GHOST - first scenario OK" },
+    { "action": "screenshot", "label": "typed" },
+    { "action": "hotkey", "keys": ["alt", "f4"], "label": "닫기 요청",
+      "expect": { "visible": "save_prompt", "timeout": 3 } },
+    { "action": "click", "target": "dont_save_btn", "label": "저장 안 함",
+      "expect": { "gone": "notepad_title", "timeout": 3 }, "retry": 1 },
+    { "action": "screenshot", "label": "closed" }
+  ]
+}
