@@ -29,7 +29,7 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
-from .vision import find
+from .locator import Locator, describe
 
 TYPES = {"target", "no_signal", "frozen"}
 ACTIONS = {"notify", "stop", "handler"}
@@ -66,8 +66,11 @@ def validate_rules(rules: List[dict], registry=None) -> List[str]:
         if t == "target":
             if "target" not in r:
                 errs.append(f"{w}: target 필요")
-            elif registry is not None and r["target"] not in registry:
-                errs.append(f"{w}: 등록되지 않은 target '{r['target']}'")
+            elif registry is not None:
+                loc = registry if isinstance(registry, Locator) else Locator(registry, {})
+                e = loc.validate(r["target"])
+                if e:
+                    errs.append(f"{w}: {e}")
         if t == "frozen" and not (r.get("region") and r.get("seconds")):
             errs.append(f"{w}: frozen 은 region, seconds 필요")
         a = r.get("action", "notify")
@@ -93,9 +96,9 @@ def load_rules(spec, base_dir: str = ".") -> List[dict]:
 
 
 class Surveillance:
-    def __init__(self, rules: List[dict], registry, cfg: dict):
+    def __init__(self, rules: List[dict], locator, cfg: dict):
         self.rules = rules
-        self.reg = registry
+        self.loc = locator if isinstance(locator, Locator) else Locator(locator, cfg)
         self.cfg = cfg
         self.active: Dict[str, bool] = {r["name"]: False for r in rules}
         self._rearmed: set = set()
@@ -106,13 +109,9 @@ class Surveillance:
         """(이상 상태 여부, 설명)"""
         t = r.get("type", "target")
         if t == "target":
-            rec = self.reg.get(r["target"])
-            region = r.get("region") or rec.get("region")
-            m = find(frame, self.reg.template(r["target"]),
-                     threshold=r.get("threshold", rec.get("threshold", self.cfg["vision"]["threshold"])),
-                     region=tuple(region) if region else None,
-                     color_tol=r.get("color_tol", rec.get("color_tol")))
-            return (m is not None), (f"{r['target']}@{m.center} score={m.score}" if m else "")
+            m = self.loc.locate(r["target"], frame, region=r.get("region"), threshold=r.get("threshold"),
+                                color_tol=r.get("color_tol"))
+            return (m is not None), (f"{describe(r['target'])}@{m.center} score={m.score}" if m else "")
         if t == "no_signal":
             std = float(frame.std())
             return std < r.get("max_std", 2.0), f"std={std:.2f}"

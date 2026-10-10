@@ -2,6 +2,7 @@
 """시나리오 실행기: 스텝 실행 + 사후조건 확인 + 재시도 + 블랙박스 기록."""
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -11,9 +12,10 @@ from .. import config as config_mod
 from ..blackbox import Blackbox, NullBlackbox
 from ..device import Device
 from ..hal.base import LEFT, RIGHT
+from ..locator import Locator, describe as tdesc
 from ..registry import Registry
 from ..surveillance import Notifier, Surveillance, WatchEvent, validate_rules
-from ..vision import Match, find
+from ..vision import Match
 from . import model
 
 MAX_DEPTH = 8
@@ -38,6 +40,7 @@ class RunResult:
     run_dir: str = ""
     stopped: bool = False
     aborted_by: str = ""                       # 감시 규칙에 의해 중단된 경우 규칙 이름
+    values: dict = field(default_factory=dict) # read 액션으로 읽은 값
     watch_events: List[dict] = field(default_factory=list)
 
 
@@ -59,6 +62,7 @@ class Runner:
         self.cfg = cfg
         self.bb = blackbox or NullBlackbox()
         self.log = log or print
+        self.loc = Locator(registry, cfg, self.log)
         self.stop_event = threading.Event()
         self.scenario_dirs = [config_mod.path(cfg, "scenarios")]
         self.base_watch: List[dict] = []       # 모든 실행에 적용할 감시 규칙 (CLI --watch)
@@ -72,10 +76,10 @@ class Runner:
 
     # ------------------------------------------------------------ 감시
     def _set_watch(self, rules: List[dict]) -> None:
-        errs = validate_rules(rules, self.reg)
+        errs = validate_rules(rules, self.loc)
         if errs:
             raise model.ScenarioError(errs)
-        self.watch = Surveillance(rules, self.reg, self.cfg) if rules else None
+        self.watch = Surveillance(rules, self.loc, self.cfg) if rules else None
         self._handler_runs, self._handler_last = {}, {}
 
     def _tick(self, frame=None) -> None:
@@ -135,19 +139,14 @@ class Runner:
             self._tick()
 
     # ------------------------------------------------------------ 비전 조회
-    def find(self, target: str, frame=None) -> Optional[Match]:
-        rec = self.reg.get(target)
-        tmpl = self.reg.template(target)
-        if tmpl is None:
-            raise StepFailed(f"target '{target}' 템플릿 파일 없음")
+    def find(self, target, frame=None) -> Optional[Match]:
         frame = self.dev.frame() if frame is None else frame
-        return find(frame, tmpl,
-                    threshold=rec.get("threshold", self.cfg["vision"]["threshold"]),
-                    region=tuple(rec["region"]) if rec.get("region") else None,
-                    scales=rec.get("scales", self.cfg["vision"]["scales"]),
-                    color_tol=rec.get("color_tol"))
+        try:
+            return self.loc.locate(target, frame)
+        except FileNotFoundError as e:
+            raise StepFailed(str(e))
 
-    def wait_for(self, target: str, timeout: float, gone: bool = False) -> Optional[Match]:
+    def wait_for(self, target, timeout: float, gone: bool = False) -> Optional[Match]:
         """visible: 찾으면 Match 반환 / gone: 사라지면 None 반환. 시간 초과 시 StepFailed."""
         deadline = time.monotonic() + timeout
         while True:
@@ -158,24 +157,66 @@ class Runner:
                 return m
             if time.monotonic() >= deadline or self.stop_event.is_set():
                 state = "사라지지 않음" if gone else "미검출"
-                raise StepFailed(f"{target} {state} ({timeout}s)")
+                raise StepFailed(f"{tdesc(target)} {state} ({timeout}s)")
             time.sleep(self.cfg["timing"]["poll"])
 
     def _point(self, st: dict) -> Tuple[Tuple[int, int], str]:
         if "target" not in st:
             return (int(st["x"]), int(st["y"])), f"({st['x']},{st['y']})"
         t = st["target"]
-        rec = self.reg.get(t)
+        rec = self.loc.spec(t)
         try:
             m = self.wait_for(t, st.get("timeout", 3.0))
         except StepFailed:
             if st.get("allow_hint") and "hint" in rec:
                 hx, hy = rec["hint"]
-                return (int(hx), int(hy)), f"{t} 힌트좌표({hx},{hy}) — 템플릿 미검출"
+                return (int(hx), int(hy)), f"{tdesc(t)} 힌트좌표({hx},{hy}) — 미검출"
             raise
         ox, oy = rec.get("click_offset", (0, 0))
         cx, cy = m.center
-        return (cx + ox, cy + oy), f"{t}@({cx + ox},{cy + oy}) score={m.score}"
+        return (cx + ox, cy + oy), f"{tdesc(t)}@({cx + ox},{cy + oy}) score={m.score}"
+
+    def _read(self, st: dict, res: RunResult) -> str:
+        """화면 영역의 글자를 읽어 값으로 저장. anchor 지정 시 anchor target 위치 기준 상대 영역."""
+        region = st.get("region")
+        if "anchor" in st:
+            m = self.wait_for(st["anchor"], st.get("timeout", 3.0))
+            dx, dy, w, h = st["offset"]
+            region = [m.box[0] + dx, m.box[1] + dy, w, h]
+        frame = self.dev.frame()
+        name = st.get("name", "value")
+        extra = {}
+        if st.get("vote"):                       # 다수결 판독 (세그먼트 숫자 등 오인식이 잦은 글꼴)
+            raw, agree, cands = self.loc.ocr.read_vote(frame, region)
+            extra = {"agree": agree, "candidates": cands}
+            if agree < st.get("min_agree", 0.5):
+                self.bb.event("read", name=name, value=None, raw=raw, region=region, **extra)
+                raise StepFailed(f"{name}: 판독 불일치 (일치도 {agree}) {cands}")
+            hits = []
+        else:
+            hits = self.loc.ocr.read(frame, region, st.get("scale"), st.get("line"))
+            raw = " ".join(h.text for h in sorted(hits, key=lambda h: (h.center[1] // 12, h.box[0])))
+        value = raw
+        if "pattern" in st:
+            mt = re.search(st["pattern"], raw)
+            if not mt:
+                raise StepFailed(f"{name}: '{raw}' 에서 패턴 불일치")
+            value = mt.group(1) if mt.groups() else mt.group(0)
+        res.values[name] = value                 # 범위 검사 실패여도 판독값은 남긴다 (감사 추적)
+        self.bb.event("read", name=name, value=value, raw=raw, region=region,
+                      hits=[(h.text, h.conf) for h in hits], **extra)
+        if region is not None:
+            x, y, w, h = (int(v) for v in region)
+            self.bb.frame(frame[max(0, y):y + h, max(0, x):x + w], f"read_{name}")
+        if "min" in st or "max" in st:
+            try:
+                num = float(value.replace(",", ""))
+            except ValueError:
+                raise StepFailed(f"{name}: 수치가 아님 {value!r}")
+            if ("min" in st and num < st["min"]) or ("max" in st and num > st["max"]):
+                raise StepFailed(f"{name}={num} 허용 범위 [{st.get('min', '-')}, {st.get('max', '-')}] 밖")
+        return (f"{name} = {value!r}" + (f" (원문 {raw!r})" if raw != value else "")
+                + (f" [다수결 일치도 {extra['agree']}]" if extra else ""))
 
     # ------------------------------------------------------------ 실행
     def run(self, sc: dict) -> RunResult:
@@ -190,6 +231,8 @@ class Runner:
             self.log(f"  감시 규칙: {', '.join(r['name'] for r in self.watch.rules)}")
         try:
             res.ok = self._run_steps(sc["steps"], res, prefix="", depth=0)
+            if not res.ok and not self.stop_event.is_set():
+                self._on_abort(sc, res)          # 스텝 실패도 안전 복귀 (사용자 중지는 제외)
         except WatchAbort as e:
             res.ok, res.aborted_by = False, e.ev.rule
             self.log(f"■ {e}")
@@ -210,7 +253,7 @@ class Runner:
         return res
 
     def _on_abort(self, sc: dict, res: RunResult) -> None:
-        """감시 중단 후 안전 복귀 시나리오(on_abort) 실행. 복귀 중에는 감시하지 않는다."""
+        """실패·감시 중단 후 안전 복귀 시나리오(on_abort) 실행. 복귀 중에는 감시하지 않는다."""
         name = sc.get("on_abort")
         if not name:
             return
@@ -282,7 +325,7 @@ class Runner:
                 if exp:
                     gone = "gone" in exp
                     self.wait_for(exp.get("gone") or exp.get("visible"), exp.get("timeout", 3.0), gone=gone)
-                    msg += f" / 확인: {exp.get('gone') or exp.get('visible')} {'사라짐' if gone else '표시'}"
+                    msg += f" / 확인: {tdesc(exp.get('gone') or exp.get('visible'))} {'사라짐' if gone else '표시'}"
                 return True, msg if n == 0 else f"{msg} (재시도 {n}회)"
             except StepFailed as e:
                 msg = str(e)
@@ -314,10 +357,12 @@ class Runner:
             return f"{st['sec']}s"
         if a in ("wait_for", "expect"):
             m = self.wait_for(st["target"], st.get("timeout", 10.0 if a == "wait_for" else 0.0))
-            return f"{st['target']} 표시 score={m.score}"
+            return f"{tdesc(st['target'])} 표시 score={m.score}"
         if a == "wait_gone":
             self.wait_for(st["target"], st.get("timeout", 10.0), gone=True)
-            return f"{st['target']} 사라짐"
+            return f"{tdesc(st['target'])} 사라짐"
+        if a == "read":
+            return self._read(st, res)
         if a == "screenshot":
             p = self.bb.frame(d.frame(), st.get("label", "shot"))
             return p or "blackbox 비활성"

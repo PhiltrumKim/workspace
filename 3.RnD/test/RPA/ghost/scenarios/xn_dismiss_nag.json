@@ -1,0 +1,9 @@
+{
+  "ghost": 1,
+  "name": "xn_dismiss_nag",
+  "description": "XNote 평가판 안내 팝업 → 'Remind me later' (OCR 텍스트로 버튼 찾기)",
+  "steps": [
+    { "action": "click", "target": "xn_remind_later", "timeout": 5,
+      "expect": { "gone": "xn_nag_title", "timeout": 3 }, "retry": 1 }
+  ]
+}

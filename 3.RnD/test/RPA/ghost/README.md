@@ -13,7 +13,9 @@ ghost/
     relayboard.py   TX-RelayBoard 시리얼 프로토콜 (MiTx C++ 와 바이트 단위 일치)
     keymap.py       키 이름 → (Windows VK, PS/2 Set1 make code, 확장키)
   device.py       화면 좌표 조작: 홈잉, 커서 실측, 폐루프 이동, 클릭, 키보드/텍스트
-  vision/         템플릿 매칭 (영역 제한, 다중 배율)
+  vision/         템플릿 매칭(영역 제한, 다중 배율, 색 검증) + OCR(ocr.py)
+  locator.py      target 탐색 공용 계층 (템플릿/텍스트, 실행기·감시 공용)
+  surveillance.py 감시 규칙(target/no_signal/frozen), 알림
   registry.py     GUI target 레지스트리 (objects/objects.json + PNG)
   scenario/       시나리오 형식 v1 (검증·레거시 변환) + 실행기 (재시도·사후조건·하위 호출·중지)
   blackbox.py     실행 기록 (runs/<시각>_<이름>/events.jsonl + 프레임)
@@ -28,6 +30,7 @@ tests/            pytest (전부 시뮬레이터 기반, 장비 불필요)
 
 ```bash
 py -3.9 -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+.venv/Scripts/python -m ghost fetch-models                            # 한국어 OCR 모델 (최초 1회)
 .venv/Scripts/python -m pytest -q                                     # 테스트
 .venv/Scripts/python -m ghost run scenarios/sim/demo_run_recipe.json --sim
 .venv/Scripts/python -m ghost run scenarios/sim/demo_alarm_recovery.json --sim
@@ -39,7 +42,9 @@ py -3.9 -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 python -m ghost probe                 # COM 포트 목록 + 캡처 확인
 python -m ghost probe --smoke         # 홈잉 + 3점 이동 + 커서 실측 (클릭 없음)
 python -m ghost snap shot.png         # 화면 저장
-python -m ghost add-target ok_btn --image shot.png --box 860,600,200,60   # target 등록
+python -m ghost add-target ok_btn --image shot.png --box 860,600,200,60   # 템플릿 target 등록
+python -m ghost ocr shot.png --region 900,500,300,100                     # 글자·좌표 확인 (텍스트 target / read 영역 잡기)
+python -m ghost add-target ok_txt --text "확인" --box 973,583,90,28         # 텍스트(OCR) target 등록
 python -m ghost run scenarios/my_job.json
 ```
 
@@ -106,6 +111,54 @@ python -m ghost run scenarios/my_job.json
 
 실장비 예제: `scenarios/hw_watch_demo.json` — 작업 중 Windows 경고 팝업(⚠) 발생 → 탐지 → `ack_win_alert` 로 확인 클릭 → 작업 계속 (3/3 성공).
 
+## OCR (화면 글자 인식)
+
+- 엔진: RapidOCR (PP-OCR ONNX)
+- 한국어 인식 모델: PaddlePaddle `korean_PP-OCRv5_mobile_rec` (Apache-2.0)
+  - `python -m ghost fetch-models` 로 `models/` 에 받는다 (git 제외).
+  - 모델이 없으면 기본 모델(중국어·영어)로 동작하며, 이때는 한글을 읽지 못한다.
+- ONNX 모델이라 TX 엣지 장비(C++ onnxruntime)로 옮길 수 있다.
+- 비전·OCR 기반 인식은 PPT 의 특허 회피 방향(「RPA용 GUI 오브젝트 주소 생성」)과도 맞다.
+
+**텍스트 target**: 템플릿 대신 글자로 찾는다. click, wait_for, expect, 감시 규칙 어디서나 쓸 수 있다.
+```json
+{"action": "click", "target": {"text": "Remind me later"}}
+{"action": "click", "target": {"text": "Close", "match": "exact", "region": [1490, 690, 320, 180]}}
+```
+레지스트리에 이름으로 등록할 수도 있다: `add-target menu_close --text Close --match exact --box ...`
+
+`match` 종류: `contains`(기본), `exact`, `regex`, `fuzzy`(유사도 0.9 이상)
+- 메뉴 항목은 `exact` 로 찾는다. 포함 일치로 "Stop" 을 찾으면 "Stopwatch" 가, "Close" 를 찾으면 "Close All" 이 걸린다.
+
+**read 액션**: 화면 글자·수치를 읽어 `values` 에 저장하고, 블랙박스에 판독값과 영역 이미지를 남긴다.
+```json
+{"action": "read", "name": "elapsed_s", "region": [1140, 20, 770, 240], "vote": true,
+ "pattern": "^00:00:(\\d\\d\\.\\d\\d)$", "min": 5, "max": 20}
+```
+- `anchor` + `offset`: target 위치 기준 상대 영역에서 읽는다.
+- `pattern`: 정규식으로 값만 뽑는다.
+- `min` / `max`: 범위를 벗어나면 스텝 실패.
+
+**실장비에서 얻은 OCR 운용 요령**
+
+| 현상 | 대응 |
+|---|---|
+| 전체 화면 OCR 은 ~2s 로 느림 | 항상 `region` 을 준다 (~0.5s) |
+| 작은 버튼 글자를 검출 단계가 잘못 자름 ("확인" → "교후") | 한 줄 모드 `line`: 검출 없이 영역 전체를 인식 ("확인" 0.99). 높이 40px 이하 영역은 자동 적용 |
+| 한 줄 모드는 빈 공간이 많거나 배율이 안 맞으면 틀림 | 글자 부분만 자동으로 잘라내고, 글자 높이 ~40px 이 되도록 배율 자동 조정 |
+| 검출기가 "STATUS: DONE" 을 단어별로 쪼갬 | 같은 줄 결과를 이어 붙인 문자열로도 비교 |
+| 세그먼트 숫자 표시창에서 0↔8 오인식 | `vote`: 배율 6가지로 읽고 글자 위치별 다수결. 일치도가 0.5 미만이면 실패 처리 |
+| 좁은 글자 "1" 앞에 공백이 끼어 정규식 불일치 | 정규식은 공백을 제거한 문자열로도 비교 |
+| 판독 영역 위의 커서나 메뉴가 판독을 오염 | 읽기 전에 커서를 치운다 (`move`). 메뉴가 덮으면 일치도가 떨어져 실패로 걸러진다 |
+
+실장비 예제 `scenarios/xnote_measure.json` (XNote Stopwatch, 3/3 성공, 재시도 0):
+1. Win+R 로 실행한다.
+2. 평가판 팝업은 감시 핸들러가 OCR 로 "Remind me later" 를 찾아 처리한다.
+3. 우클릭 메뉴 Start → 5초 → Stop (메뉴 항목은 OCR 완전 일치로 찾는다).
+4. 경과 시간을 다수결로 판독하고 범위를 검사한다 (12.52 / 12.63 / 12.60 s, 일치도 1.0).
+5. Reset 후 `00:00:00.00` 을 확인하고 Close 로 종료한다.
+- 실패하면 `on_abort` 로 프로그램을 닫는다.
+
 ## 템플릿 매칭과 색 검증
 
 `TM_CCOEFF_NORMED` 는 밝기·색 평균을 빼고 비교한다. 그래서 **배경색만 다른 상태를 구분하지 못한다**.
@@ -141,9 +194,10 @@ Windows 대상은 **'포인터 정확도 향상'(마우스 가속)을 끄는 것
    - 속도 구간별 이득 학습
    - 드래그·스크롤
 3. 인식 강화
-   - OCR로 텍스트 기반 target 지정
-   - 화면 상태 판별
-   - 다중 매칭
+   - ~~OCR로 텍스트 기반 target 지정~~ (텍스트 target, read, vote, 한국어 모델)
+   - 화면 상태 판별 (현재: 템플릿 + color_tol)
+   - 다중 매칭 (같은 target 여러 개 중 n 번째)
+   - OCR 속도 (메뉴 확인 1회 ~2.5s → 대기시간에 반영됨, GPU/영역 축소 검토)
 4. 감시
    - ~~알람·에러 팝업 상시 감시 루프와 알림~~ (target / no_signal / frozen, 웹훅)
    - ~~이상 시 안전 정지~~ (stop + on_abort)

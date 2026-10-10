@@ -1,0 +1,9 @@
+{
+  "rules": [
+    { "name": "xnote_nag", "type": "target", "target": "xn_nag_title",
+      "severity": "info", "action": "handler", "handler": "xn_dismiss_nag", "cooldown": 1 },
+    { "name": "win_warning_popup", "type": "target", "target": "warn_icon",
+      "severity": "critical", "action": "stop" },
+    { "name": "capture_lost", "type": "no_signal", "severity": "critical", "action": "stop" }
+  ]
+}

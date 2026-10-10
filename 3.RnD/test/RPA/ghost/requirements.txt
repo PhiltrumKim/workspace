@@ -2,3 +2,4 @@ opencv-python>=4.8,<5
 numpy>=1.24
 pyserial>=3.5
 pytest>=7
+rapidocr-onnxruntime>=1.4,<2

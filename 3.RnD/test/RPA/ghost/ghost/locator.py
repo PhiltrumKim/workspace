@@ -1,0 +1,78 @@
+# -*- coding: utf-8 -*-
+"""Locator: target 을 화면에서 찾는 공용 계층 (실행기·감시가 함께 사용).
+
+target 지정 방법
+  "start_btn"                                   레지스트리 이름 (템플릿 또는 텍스트 항목)
+  {"text": "저장 안 함", "region": [x,y,w,h],    텍스트(OCR) — 인라인 지정
+   "match": "contains", "scale": 2,             match: exact | contains(기본) | regex | fuzzy
+   "line": true,                                line: 영역을 한 줄로 바로 인식 (좁은 버튼·수치창, 생략 시 높이≤40 자동)
+   "vote": true}                                vote: 다수결 판독 결과로 비교 (세그먼트 숫자 표시창)
+
+레지스트리(objects.json)에 템플릿 대신 "text" 를 가진 항목을 두면 이름으로도 텍스트 target 을 쓸 수 있다.
+  "dont_save": {"text": "저장 안 함", "region": [900, 500, 200, 60]}
+"""
+from __future__ import annotations
+
+from typing import Optional, Union
+
+import numpy as np
+
+from .registry import Registry
+from .vision import Match, find
+from .vision.ocr import MODES, OcrEngine
+
+Target = Union[str, dict]
+
+
+def is_text_spec(spec: dict) -> bool:
+    return "text" in spec
+
+
+def describe(target: Target) -> str:
+    if isinstance(target, str):
+        return target
+    return f'"{target["text"]}"' + (f"@{target['region']}" if target.get("region") else "")
+
+
+class Locator:
+    def __init__(self, registry: Registry, cfg: dict, log=None):
+        self.reg = registry
+        self.cfg = cfg
+        self.log = log or (lambda m: None)
+        self._ocr: Optional[OcrEngine] = None
+
+    @property
+    def ocr(self) -> OcrEngine:
+        if self._ocr is None:
+            self._ocr = OcrEngine(self.cfg, self.cfg.get("_base_dir", "."), self.log)
+        return self._ocr
+
+    def spec(self, target: Target) -> dict:
+        """target → 통합 사양 dict (레지스트리 항목이면 그 내용)."""
+        return target if isinstance(target, dict) else self.reg.get(target)
+
+    def validate(self, target: Target) -> Optional[str]:
+        if isinstance(target, str):
+            return None if target in self.reg else f"등록되지 않은 target '{target}'"
+        if not isinstance(target, dict) or not is_text_spec(target):
+            return f"target 형식 오류: {target!r}"
+        if target.get("match", "contains") not in MODES:
+            return f"알 수 없는 match '{target.get('match')}'"
+        return None
+
+    def locate(self, target: Target, frame: np.ndarray, **overrides) -> Optional[Match]:
+        spec = {**self.spec(target), **{k: v for k, v in overrides.items() if v is not None}}
+        region = tuple(spec["region"]) if spec.get("region") else None
+        if is_text_spec(spec):
+            hit = self.ocr.find_text(frame, spec["text"], region=region, mode=spec.get("match", "contains"),
+                                     min_ratio=spec.get("min_ratio", 0.9), scale=spec.get("scale"),
+                                     line=spec.get("line"), vote=spec.get("vote", False))
+            return Match(hit.box, hit.conf) if hit else None
+        tmpl = self.reg.template(target)
+        if tmpl is None:
+            raise FileNotFoundError(f"target '{target}' 템플릿 파일 없음")
+        return find(frame, tmpl,
+                    threshold=spec.get("threshold", self.cfg["vision"]["threshold"]),
+                    region=region,
+                    scales=spec.get("scales", self.cfg["vision"]["scales"]),
+                    color_tol=spec.get("color_tol"))

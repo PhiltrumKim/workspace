@@ -8,6 +8,7 @@ objects.json 항목:
    "click_offset": [dx, dy],    (선택) 매칭 중심 대비 클릭 위치 보정
    "hint": [x, y],              (선택) 템플릿 미검출 시 폴백 좌표 (스텝에 allow_hint 필요)
    "color_tol": 25}             (선택) 색 검증 허용치 — 배경색으로 상태를 구분하는 target 에 사용
+텍스트(OCR) target 은 file 대신 "text" 를 둔다: {"text": "저장 안 함", "region": [...], "match": "contains"}
 레거시(magewell_rpa) objects.json 의 "click" 키는 hint 로 읽는다.
 """
 from __future__ import annotations
@@ -46,6 +47,8 @@ class Registry:
 
     def template(self, name: str) -> Optional[np.ndarray]:
         if name not in self._cache:
+            if "file" not in self.get(name):          # 텍스트 target
+                return None
             path = os.path.join(self.root, self.get(name)["file"])
             img = cv2.imread(path) if os.path.exists(path) else None
             if img is None:
@@ -61,6 +64,14 @@ class Registry:
         rec.update({k: v for k, v in meta.items() if v is not None})
         self.targets[name] = rec
         self._cache[name] = img
+        self.save()
+        return rec
+
+    def add_text(self, name: str, text: str, **meta) -> dict:
+        rec = {"text": text}
+        rec.update({k: v for k, v in meta.items() if v is not None})
+        self.targets[name] = rec
+        self._cache.pop(name, None)
         self.save()
         return rec
 

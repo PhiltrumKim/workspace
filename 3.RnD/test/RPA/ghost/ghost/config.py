@@ -53,6 +53,12 @@ DEFAULTS = {
         "frame_on_fail": True,
         "frame_every_step": False,
     },
+    # OCR: rec_model 디렉터리(inference.onnx + dict.txt). 없으면 기본(중/영) 모델로 동작
+    "ocr": {
+        "rec_model": "models/korean_PP-OCRv5_mobile_rec",
+        "scale": 1.0,
+        "min_conf": 0.5,
+    },
     # 감시 알림: webhook 에 URL 을 넣으면 min_severity 이상 이벤트를 JSON POST (Teams/Slack 등 수신 웹훅)
     "notify": {
         "webhook": None,

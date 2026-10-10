@@ -26,4 +26,8 @@ def cfg(tmp_path, sim_objects):
     p = tmp_path / "ghost.json"
     p.write_text(json.dumps({"paths": {"objects": sim_objects, "scenarios": str(scen),
                                        "runs": str(tmp_path / "runs")}}), encoding="utf-8")
-    return config.load(str(p), sim=True)
+    c = config.load(str(p), sim=True)
+    model = os.path.join(ROOT, "models", "korean_PP-OCRv5_mobile_rec")
+    if os.path.isdir(model):                         # 받아 둔 한국어 OCR 모델 사용 (없으면 기본 모델)
+        c["ocr"]["rec_model"] = model
+    return c

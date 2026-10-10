@@ -15,15 +15,20 @@
 }
 
 감시: "watch": [규칙...] 또는 "규칙파일.json" (ghost/surveillance.py 참고)
-안전 복귀: "on_abort": "시나리오 이름" — 감시 규칙(action=stop)으로 중단되면 실행
+안전 복귀: "on_abort": "시나리오 이름" — 스텝 실패 또는 감시 규칙(action=stop) 중단 시 실행 (사용자 중지는 제외)
 
 공통 필드: label, retry(실패 시 재시도 횟수), expect({visible|gone: target, timeout}) 사후조건
 포인터 동작(click/double/right_click/move)은 target 또는 x,y 중 하나 필요.
   target 옵션: timeout(탐색 대기, 기본 3초), threshold, allow_hint(템플릿 미검출 시 hint 좌표 사용)
+  target 은 레지스트리 이름 또는 텍스트(OCR) {"text": "START", "region": [x,y,w,h], "match": "contains"}
+read: {"action": "read", "name": "elapsed", "region": [x,y,w,h] | "anchor": target + "offset": [dx,dy,w,h],
+       "pattern": "정규식", "min": 0, "max": 100, "scale": 2,
+       "vote": true, "min_agree": 0.5} — 화면 글자/수치 읽기 (OCR). vote: 여러 설정 판독 후 위치별 다수결
 """
 from __future__ import annotations
 
 import json
+import re
 from typing import List, Optional
 
 from ..hal import keymap
@@ -33,7 +38,7 @@ REQUIRED = {
     "click": [], "double": [], "right_click": [], "move": [],
     "key": ["key"], "hotkey": ["keys"], "type": ["text"],
     "wait": ["sec"], "wait_for": ["target"], "wait_gone": ["target"], "expect": ["target"],
-    "screenshot": [], "call": ["scenario"], "home": [],
+    "screenshot": [], "call": ["scenario"], "home": [], "read": [],
 }
 FORMAT_VERSION = 1
 
@@ -55,7 +60,10 @@ def validate(sc: dict, registry=None) -> List[str]:
         return errs + ["steps 가 비어 있음"]
 
     def check_target(where, t):
-        if registry is not None and t not in registry:
+        if isinstance(t, dict):
+            if "text" not in t:
+                errs.append(f"{where}: 인라인 target 은 text 필요 {t!r}")
+        elif registry is not None and t not in registry:
             errs.append(f"{where}: 등록되지 않은 target '{t}'")
 
     for i, st in enumerate(steps):
@@ -74,6 +82,18 @@ def validate(sc: dict, registry=None) -> List[str]:
                 errs.append(f"{where} {a}: target 또는 x,y 필요")
         if a in ("wait_for", "wait_gone", "expect") and "target" in st:
             check_target(where, st["target"])
+        if a == "read":
+            if "anchor" in st:
+                check_target(where, st["anchor"])
+                if len(st.get("offset", [])) != 4:
+                    errs.append(f"{where} read: anchor 사용 시 offset [dx,dy,w,h] 필요")
+            elif len(st.get("region", [])) != 4:
+                errs.append(f"{where} read: region [x,y,w,h] 또는 anchor+offset 필요")
+            if "pattern" in st:
+                try:
+                    re.compile(st["pattern"])
+                except re.error as e:
+                    errs.append(f"{where} read: pattern 오류 {e}")
         if a == "key" and "key" in st:
             _check_key(errs, where, st["key"])
         if a == "hotkey" and "keys" in st:
@@ -162,7 +182,7 @@ def describe(st: dict) -> str:
     a = st.get("action")
     lab = f"  «{st['label']}»" if st.get("label") else ""
     if a in POINTER:
-        where = st.get("target") or f"({st.get('x')},{st.get('y')})"
+        where = _t(st["target"]) if "target" in st else f"({st.get('x')},{st.get('y')})"
         return f"{a} {where}{lab}"
     if a == "key":
         return f"key {st['key']}{lab}"
@@ -173,10 +193,16 @@ def describe(st: dict) -> str:
     if a == "wait":
         return f"wait {st['sec']}s{lab}"
     if a in ("wait_for", "wait_gone", "expect"):
-        return f"{a} {st['target']}{lab}"
+        return f"{a} {_t(st['target'])}{lab}"
     if a == "call":
         return f"call ▷ {st['scenario']}{lab}"
+    if a == "read":
+        return f"read {st.get('name', 'value')}{lab}"
     return f"{a}{lab}"
+
+
+def _t(target) -> str:
+    return target if isinstance(target, str) else f'"{target.get("text")}"'
 
 
 def find_path(name: str, dirs: List[str]) -> Optional[str]:

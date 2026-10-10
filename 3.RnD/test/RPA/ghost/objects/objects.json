@@ -69,5 +69,70 @@
       1018,
       597
     ]
+  },
+  "xn_display": {
+    "text": "\\d\\d:\\d\\d:\\d\\d\\.\\d\\d",
+    "match": "regex",
+    "region": [
+      1140,
+      20,
+      770,
+      240
+    ],
+    "vote": true
+  },
+  "menu_start": {
+    "text": "Start",
+    "match": "exact",
+    "region": [
+      1490,
+      120,
+      320,
+      110
+    ]
+  },
+  "menu_stop": {
+    "text": "Stop",
+    "match": "exact",
+    "region": [
+      1490,
+      120,
+      320,
+      110
+    ]
+  },
+  "menu_reset": {
+    "text": "Reset",
+    "match": "exact",
+    "region": [
+      1490,
+      120,
+      320,
+      110
+    ]
+  },
+  "menu_close": {
+    "text": "Close",
+    "match": "exact",
+    "region": [
+      1490,
+      690,
+      320,
+      180
+    ]
+  },
+  "xn_remind_later": {
+    "text": "Remind me later",
+    "match": "contains"
+  },
+  "xn_nag_title": {
+    "file": "xn_nag_title.png",
+    "w": 212,
+    "h": 22,
+    "threshold": 0.85,
+    "hint": [
+      822,
+      482
+    ]
   }
 }
