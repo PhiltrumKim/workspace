@@ -12,10 +12,12 @@ from ..blackbox import Blackbox, NullBlackbox
 from ..device import Device
 from ..hal.base import LEFT, RIGHT
 from ..registry import Registry
+from ..surveillance import Notifier, Surveillance, WatchEvent, validate_rules
 from ..vision import Match, find
 from . import model
 
 MAX_DEPTH = 8
+MAX_HANDLER_RUNS = 5          # 실행 1회당 같은 규칙 핸들러 최대 실행 횟수 (처리 안 되는 알람 무한 반복 방지)
 
 
 @dataclass
@@ -35,10 +37,18 @@ class RunResult:
     steps: List[StepResult] = field(default_factory=list)
     run_dir: str = ""
     stopped: bool = False
+    aborted_by: str = ""                       # 감시 규칙에 의해 중단된 경우 규칙 이름
+    watch_events: List[dict] = field(default_factory=list)
 
 
 class StepFailed(Exception):
     pass
+
+
+class WatchAbort(Exception):
+    def __init__(self, ev: WatchEvent, reason: str = ""):
+        super().__init__(reason or f"감시 규칙 '{ev.rule}' 에 의해 중단")
+        self.ev = ev
 
 
 class Runner:
@@ -51,6 +61,78 @@ class Runner:
         self.log = log or print
         self.stop_event = threading.Event()
         self.scenario_dirs = [config_mod.path(cfg, "scenarios")]
+        self.base_watch: List[dict] = []       # 모든 실행에 적용할 감시 규칙 (CLI --watch)
+        self.watch: Optional[Surveillance] = None
+        self.notifier = Notifier(cfg, self.log)
+        self._handling = False
+        self._handler_runs: dict = {}
+        self._handler_last: dict = {}
+        self._res: Optional[RunResult] = None
+        self._name = ""
+
+    # ------------------------------------------------------------ 감시
+    def _set_watch(self, rules: List[dict]) -> None:
+        errs = validate_rules(rules, self.reg)
+        if errs:
+            raise model.ScenarioError(errs)
+        self.watch = Surveillance(rules, self.reg, self.cfg) if rules else None
+        self._handler_runs, self._handler_last = {}, {}
+
+    def _tick(self, frame=None) -> None:
+        """감시 1회: 이벤트 기록·알림 후 규칙의 action 수행. 핸들러 실행 중에는 감시하지 않는다."""
+        if self.watch is None or self._handling:
+            return
+        frame = self.dev.frame() if frame is None else frame
+        for ev in self.watch.check(frame):
+            self.bb.event("watch", event=ev.as_dict())
+            if self._res is not None:
+                self._res.watch_events.append(ev.as_dict())
+            self.notifier(ev, self._name)
+            if ev.kind != "appeared":
+                continue
+            if ev.action == "stop":
+                self.bb.frame(frame, f"WATCH_{ev.rule}")
+                raise WatchAbort(ev)
+            if ev.action == "handler":
+                self.bb.frame(frame, f"WATCH_{ev.rule}")
+                self._handle(ev)
+
+    def _handle(self, ev: WatchEvent) -> None:
+        rule = self.watch.rule(ev.rule)
+        n = self._handler_runs.get(ev.rule, 0)
+        if n >= MAX_HANDLER_RUNS:
+            raise WatchAbort(ev, f"'{ev.rule}' 핸들러 {n}회 실행에도 반복 발생 → 중단")
+        wait = rule.get("cooldown", 0) - (time.monotonic() - self._handler_last.get(ev.rule, -1e9))
+        if wait > 0:
+            time.sleep(wait)
+        self._handler_runs[ev.rule] = n + 1
+        self._handler_last[ev.rule] = time.monotonic()
+        self.log(f"  ↳ 핸들러 '{rule['handler']}' 실행 ({ev.rule}, {n + 1}회째)")
+        sub = self._load_sub(rule["handler"])
+        self._handling = True
+        try:
+            ok = self._run_steps(sub["steps"], self._res, prefix=f"W:{ev.rule}#{n + 1}.", depth=1)
+        finally:
+            self._handling = False
+        if not ok:
+            raise WatchAbort(ev, f"핸들러 '{rule['handler']}' 실패 → 중단")
+        self.watch.rearm(ev.rule)          # 다음 감시: 사라졌으면 cleared, 남아 있으면 다시 처리
+
+    def _load_sub(self, name: str) -> dict:
+        path = model.find_path(name, self.scenario_dirs)
+        if not path:
+            raise StepFailed(f"시나리오 '{name}' 없음")
+        return model.load(path, self.reg)
+
+    def _sleep(self, sec: float) -> None:
+        """감시를 계속하면서 대기."""
+        end = time.monotonic() + sec
+        while not self.stop_event.is_set():
+            left = end - time.monotonic()
+            if left <= 0:
+                break
+            self.stop_event.wait(min(self.cfg["timing"]["poll"], left) if self.watch else left)
+            self._tick()
 
     # ------------------------------------------------------------ 비전 조회
     def find(self, target: str, frame=None) -> Optional[Match]:
@@ -62,13 +144,16 @@ class Runner:
         return find(frame, tmpl,
                     threshold=rec.get("threshold", self.cfg["vision"]["threshold"]),
                     region=tuple(rec["region"]) if rec.get("region") else None,
-                    scales=rec.get("scales", self.cfg["vision"]["scales"]))
+                    scales=rec.get("scales", self.cfg["vision"]["scales"]),
+                    color_tol=rec.get("color_tol"))
 
     def wait_for(self, target: str, timeout: float, gone: bool = False) -> Optional[Match]:
         """visible: 찾으면 Match 반환 / gone: 사라지면 None 반환. 시간 초과 시 StepFailed."""
         deadline = time.monotonic() + timeout
         while True:
-            m = self.find(target)
+            frame = self.dev.frame()
+            self._tick(frame)
+            m = self.find(target, frame)
             if (m is None) == gone:
                 return m
             if time.monotonic() >= deadline or self.stop_event.is_set():
@@ -96,11 +181,20 @@ class Runner:
     def run(self, sc: dict) -> RunResult:
         self.stop_event.clear()
         res = RunResult(sc["name"], ok=False)
+        self._res, self._name = res, sc["name"]
+        self._set_watch(self.base_watch + list(sc.get("watch") or []))
         res.run_dir = self.bb.start(sc["name"])
         self.bb.event("scenario", scenario=sc)
         self.log(f"▶ {sc['name']} — {sc.get('description', '')}")
+        if self.watch:
+            self.log(f"  감시 규칙: {', '.join(r['name'] for r in self.watch.rules)}")
         try:
             res.ok = self._run_steps(sc["steps"], res, prefix="", depth=0)
+        except WatchAbort as e:
+            res.ok, res.aborted_by = False, e.ev.rule
+            self.log(f"■ {e}")
+            self.bb.event("abort", rule=e.ev.rule, reason=str(e))
+            self._on_abort(sc, res)
         except Exception as e:                  # 장비 오류 등: 기록하고 안전하게 종료
             self.log(f"✖ 실행 중단: {e!r}")
             self.bb.event("error", error=repr(e))
@@ -111,14 +205,54 @@ class Runner:
             except Exception:
                 pass
         res.stopped = self.stop_event.is_set()
-        self.bb.end(res.ok, stopped=res.stopped, device_stats=self.dev.stats)
+        self.bb.end(res.ok, stopped=res.stopped, aborted_by=res.aborted_by, device_stats=self.dev.stats)
         self.log(f"{'✔ 성공' if res.ok else '✖ 실패'}: {sc['name']}" + (" (중지됨)" if res.stopped else ""))
+        return res
+
+    def _on_abort(self, sc: dict, res: RunResult) -> None:
+        """감시 중단 후 안전 복귀 시나리오(on_abort) 실행. 복귀 중에는 감시하지 않는다."""
+        name = sc.get("on_abort")
+        if not name:
+            return
+        self.log(f"  ↳ 안전 복귀 '{name}' 실행")
+        self._handling = True
+        try:
+            ok = self._run_steps(self._load_sub(name)["steps"], res, prefix="R.", depth=1)
+            self.bb.event("on_abort", scenario=name, ok=ok)
+        except Exception as e:
+            self.log(f"  ✖ 안전 복귀 실패: {e!r}")
+            self.bb.event("on_abort", scenario=name, ok=False, error=repr(e))
+        finally:
+            self._handling = False
+
+    def watch_only(self, rules: List[dict], duration: Optional[float] = None,
+                   interval: Optional[float] = None) -> RunResult:
+        """시나리오 없이 화면만 감시 (handler 규칙은 실행, stop 규칙이면 종료)."""
+        self.stop_event.clear()
+        res = RunResult("watch", ok=True)
+        self._res, self._name = res, "watch"
+        self._set_watch(rules)
+        res.run_dir = self.bb.start("watch")
+        self.log(f"감시 시작: {', '.join(r['name'] for r in rules)}" + (f" ({duration}s)" if duration else ""))
+        interval = interval or self.cfg["timing"]["poll"]
+        end = None if duration is None else time.monotonic() + duration
+        try:
+            while not self.stop_event.is_set() and (end is None or time.monotonic() < end):
+                self._tick()
+                self.stop_event.wait(interval)
+        except WatchAbort as e:
+            res.ok, res.aborted_by = False, e.ev.rule
+            self.log(f"■ {e}")
+        except KeyboardInterrupt:
+            pass
+        self.bb.end(res.ok, aborted_by=res.aborted_by, events=len(res.watch_events))
         return res
 
     def _run_steps(self, steps: List[dict], res: RunResult, prefix: str, depth: int) -> bool:
         for i, st in enumerate(steps):
             if self.stop_event.is_set():
                 return False
+            self._tick()
             idx = f"{prefix}{i}"
             desc = model.describe(st)
             t0 = time.monotonic()
@@ -176,7 +310,7 @@ class Runner:
             d.type_text(st["text"])
             return f"{len(st['text'])}자 입력"
         if a == "wait":
-            self.stop_event.wait(float(st["sec"]))
+            self._sleep(float(st["sec"]))
             return f"{st['sec']}s"
         if a in ("wait_for", "expect"):
             m = self.wait_for(st["target"], st.get("timeout", 10.0 if a == "wait_for" else 0.0))
@@ -192,10 +326,7 @@ class Runner:
         if a == "call":
             if depth >= MAX_DEPTH:
                 raise StepFailed("call 깊이 초과")
-            path = model.find_path(st["scenario"], self.scenario_dirs)
-            if not path:
-                raise StepFailed(f"시나리오 '{st['scenario']}' 없음")
-            sub = model.load(path, self.reg)
+            sub = self._load_sub(st["scenario"])
             if not self._run_steps(sub["steps"], res, prefix=f"{idx}.", depth=depth + 1):
                 raise StepFailed(f"하위 '{st['scenario']}' 실패")
             return f"하위 '{st['scenario']}' 완료"

@@ -14,6 +14,9 @@
   ]
 }
 
+감시: "watch": [규칙...] 또는 "규칙파일.json" (ghost/surveillance.py 참고)
+안전 복귀: "on_abort": "시나리오 이름" — 감시 규칙(action=stop)으로 중단되면 실행
+
 공통 필드: label, retry(실패 시 재시도 횟수), expect({visible|gone: target, timeout}) 사후조건
 포인터 동작(click/double/right_click/move)은 target 또는 x,y 중 하나 필요.
   target 옵션: timeout(탐색 대기, 기본 3초), threshold, allow_hint(템플릿 미검출 시 hint 좌표 사용)
@@ -89,6 +92,12 @@ def validate(sc: dict, registry=None) -> List[str]:
                 errs.append(f"{where}: expect 는 visible 또는 gone 중 하나")
             else:
                 check_target(where, exp[keys[0]])
+    if sc.get("watch") is not None:
+        from ..surveillance import validate_rules
+        if not isinstance(sc["watch"], list):
+            errs.append("watch 는 규칙 리스트 또는 규칙 파일 경로")
+        else:
+            errs += validate_rules(sc["watch"], registry)
     return errs
 
 
@@ -104,6 +113,10 @@ def load(path: str, registry=None) -> dict:
         sc = json.load(f)
     if "ghost" not in sc:
         sc = from_legacy(sc)
+    if isinstance(sc.get("watch"), str):          # 감시 규칙 파일 참조 → 규칙 리스트로 펼침
+        import os
+        from ..surveillance import load_rules
+        sc["watch"] = load_rules(sc["watch"], os.path.dirname(os.path.abspath(path)))
     errs = validate(sc, registry)
     if errs:
         raise ScenarioError(errs)

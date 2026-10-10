@@ -48,5 +48,26 @@
       987,
       531
     ]
+  },
+  "warn_icon": {
+    "file": "warn_icon.png",
+    "w": 37,
+    "h": 34,
+    "threshold": 0.85,
+    "hint": [
+      895,
+      531
+    ],
+    "color_tol": 30.0
+  },
+  "alert_ok": {
+    "file": "alert_ok.png",
+    "w": 86,
+    "h": 24,
+    "threshold": 0.85,
+    "hint": [
+      1018,
+      597
+    ]
   }
 }

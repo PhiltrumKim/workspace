@@ -7,7 +7,7 @@
     { "action": "click", "target": "start_btn", "label": "레시피 없이 시작(알람 유발)" },
     { "action": "call", "scenario": "ack_alarm" },
     { "action": "click", "target": "nav_recipe" },
-    { "action": "click", "target": "rcp_a" },
+    { "action": "click", "target": "rcp_a", "expect": { "visible": "rcp_a_sel", "timeout": 2 }, "retry": 2 },
     { "action": "click", "target": "nav_run" },
     { "action": "click", "target": "start_btn", "expect": { "visible": "status_running", "timeout": 3 } },
     { "action": "wait_for", "target": "status_done", "timeout": 15 }

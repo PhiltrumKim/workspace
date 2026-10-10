@@ -7,6 +7,8 @@
   python -m ghost sim-assets                                     시뮬레이터용 템플릿 생성
   python -m ghost migrate --legacy ../magewell_rpa --out legacy  레거시 workflow/recipe/objects 변환
   python -m ghost probe [--smoke]                                COM 포트/캡처 확인 (+홈잉·커서 실측, 클릭 없음)
+  python -m ghost watch rules.json [--duration 60]               화면 상시 감시 (시나리오 없이)
+  python -m ghost run my.json --watch rules.json                 실행 중 추가 감시 규칙 적용
   python -m ghost snap shot.png                                  실장비 화면 1장 저장
   python -m ghost add-target NAME --image shot.png --box x,y,w,h 스크린샷에서 target 등록
 """
@@ -21,6 +23,7 @@ import time
 from . import build_device, build_runner, config
 from .registry import Registry
 from .scenario import model
+from .surveillance import load_rules
 
 
 def _log(msg: str) -> None:
@@ -43,6 +46,10 @@ def cmd_run(args) -> int:
         return 2
     if os.path.dirname(os.path.abspath(args.scenario)) not in runner.scenario_dirs:
         runner.scenario_dirs.insert(0, os.path.dirname(os.path.abspath(args.scenario)))
+    if args.watch:
+        runner.base_watch = load_rules(os.path.abspath(args.watch))
+    if args.sim and args.sim_alarm is not None:
+        dev.video.world.app.schedule_alarm(args.sim_alarm, "PRESSURE LOW")
     dev.open(home=not args.no_home)
     try:
         res = runner.run(sc)
@@ -53,6 +60,28 @@ def cmd_run(args) -> int:
         dev.close()
     _log(f"블랙박스: {res.run_dir}")
     _log(f"커서 통계: {dev.stats}  gain={[round(g, 3) for g in dev.gain]}")
+    if res.watch_events:
+        _log(f"감시 이벤트 {len(res.watch_events)}건" + (f", 중단 규칙: {res.aborted_by}" if res.aborted_by else ""))
+    return 0 if res.ok else 1
+
+
+def cmd_watch(args) -> int:
+    cfg = _cfg(args, sim=args.sim)
+    rules_path = os.path.abspath(args.rules)
+    rules = load_rules(rules_path)
+    dev = build_device(cfg, sim=args.sim, log=_log)
+    runner = build_runner(cfg, dev, log=_log)
+    runner.scenario_dirs.insert(0, os.path.dirname(rules_path))
+    needs_mouse = any(r.get("action") == "handler" for r in rules)
+    if args.sim and args.sim_alarm is not None:
+        dev.video.world.app.schedule_alarm(args.sim_alarm, "PRESSURE LOW")
+    dev.open(home=needs_mouse)      # 핸들러가 클릭할 수 있으므로 홈잉 (알림만이면 커서를 건드리지 않음)
+    try:
+        res = runner.watch_only(rules, duration=args.duration, interval=args.interval)
+    finally:
+        dev.close()
+    _log(f"감시 종료: 이벤트 {len(res.watch_events)}건" + (f", 중단 규칙: {res.aborted_by}" if res.aborted_by else ""))
+    _log(f"블랙박스: {res.run_dir}")
     return 0 if res.ok else 1
 
 
@@ -63,7 +92,16 @@ def cmd_validate(args) -> int:
     files = [f for pat in args.files for f in (glob.glob(pat) or [pat])]
     for f in files:
         try:
-            model.load(f, reg)
+            import json
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict) and "rules" in data and "steps" not in data:   # 감시 규칙 파일
+                from .surveillance import validate_rules
+                errs = validate_rules(data["rules"], reg)
+                if errs:
+                    raise model.ScenarioError(errs)
+            else:
+                model.load(f, reg)
             _log(f"✓ {f}")
         except model.ScenarioError as e:
             bad += 1
@@ -169,6 +207,8 @@ def cmd_add_target(args) -> int:
         return 1
     x, y, w, h = (int(v) for v in args.box.split(","))
     meta = {"threshold": args.threshold, "hint": [x + w // 2, y + h // 2]}
+    if args.color_tol is not None:
+        meta["color_tol"] = args.color_tol
     if args.offset:
         meta["click_offset"] = [int(v) for v in args.offset.split(",")]
     reg = Registry(config.path(cfg, "objects"))
@@ -188,7 +228,17 @@ def main(argv=None) -> int:
     s.add_argument("scenario")
     s.add_argument("--sim", action="store_true", help="시뮬레이터로 실행")
     s.add_argument("--no-home", action="store_true", help="시작 시 홈잉 생략")
+    s.add_argument("--watch", help="추가 감시 규칙 파일")
+    s.add_argument("--sim-alarm", type=float, help="(시뮬레이터) N초 뒤 알람 팝업 발생")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("watch", help="화면 상시 감시")
+    s.add_argument("rules", help='감시 규칙 파일 {"rules": [...]}')
+    s.add_argument("--sim", action="store_true")
+    s.add_argument("--duration", type=float, help="감시 시간(초). 생략 시 Ctrl+C 까지")
+    s.add_argument("--interval", type=float, help="감시 주기(초)")
+    s.add_argument("--sim-alarm", type=float, help="(시뮬레이터) N초 뒤 알람 팝업 발생")
+    s.set_defaults(fn=cmd_watch)
 
     s = sub.add_parser("validate", help="시나리오 검증")
     s.add_argument("files", nargs="+")
@@ -219,6 +269,7 @@ def main(argv=None) -> int:
     s.add_argument("--box", required=True, help="x,y,w,h")
     s.add_argument("--offset", help="클릭 위치 보정 dx,dy")
     s.add_argument("--threshold", type=float)
+    s.add_argument("--color-tol", type=float, help="색 검증 허용치 (배경색으로 상태가 구분되는 target)")
     s.add_argument("--sim", action="store_true")
     s.set_defaults(fn=cmd_add_target)
 

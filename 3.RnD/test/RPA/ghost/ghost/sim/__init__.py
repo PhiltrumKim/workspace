@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from .app import DemoEquipmentApp
+from .app import RECIPES, DemoEquipmentApp
 from .hal import SimHid, SimVideo, SimWorld
 
 # 템플릿별 매칭 설정 (비슷한 모양끼리 구분되도록 임계값을 높인다)
 _TARGET_META = {
     "rcp_a": {"threshold": 0.9}, "rcp_b": {"threshold": 0.9}, "rcp_c": {"threshold": 0.9},
+    "rcp_a_sel": {"threshold": 0.9, "color_tol": 25}, "rcp_b_sel": {"threshold": 0.9, "color_tol": 25},
+    "rcp_c_sel": {"threshold": 0.9, "color_tol": 25},
     "status_idle": {"threshold": 0.9}, "status_running": {"threshold": 0.9}, "status_done": {"threshold": 0.9},
     "lot_label": {"threshold": 0.8, "click_offset": [330, 0]},   # 라벨을 찾아 오른쪽 입력칸 클릭
 }
@@ -18,6 +20,11 @@ def export_templates(registry) -> list:
     shots = []
     app.page = "recipe"
     shots.append((app.render(), app.widgets()))
+    for name, _ in RECIPES:                                   # 선택된 행 (선택 결과 확인용 *_sel)
+        app.selected = name
+        img = app.render()
+        shots.append((img, {f"{name}_sel": app.widgets()[name]}))
+    app.selected = None
     app.page = "run"
     shots.append((app.render(), app.widgets()))
     app.selected = "rcp_a"

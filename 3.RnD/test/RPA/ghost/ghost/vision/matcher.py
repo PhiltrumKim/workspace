@@ -24,10 +24,13 @@ class Match:
 
 
 def find(frame: np.ndarray, template: np.ndarray, threshold: float = 0.6,
-         region: Optional[Box] = None, scales: Sequence[float] = (1.0,)) -> Optional[Match]:
+         region: Optional[Box] = None, scales: Sequence[float] = (1.0,),
+         color_tol: Optional[float] = None) -> Optional[Match]:
     """frame 에서 template 의 최고점 위치. score < threshold 면 None.
 
     region: 탐색 영역(x,y,w,h). scales: 템플릿 배율 후보(해상도/DPI 차이 대응).
+    color_tol: 매칭 위치의 픽셀 평균 색 차이(0~255) 허용치. TM_CCOEFF_NORMED 는 밝기/색 평균을 빼고
+      비교하므로 배경색만 다른 상태(선택 행, 상태 램프 등)를 구분하지 못한다 → 색 차이로 추가 검증.
     """
     ox = oy = 0
     search = frame
@@ -49,7 +52,13 @@ def find(frame: np.ndarray, template: np.ndarray, threshold: float = 0.6,
             continue
         if best is None or score > best.score:
             best = Match((loc[0] + ox, loc[1] + oy, tw, th), float(score), s)
+            best_t = t
     if best is None or best.score < threshold:
         return None
+    if color_tol is not None:
+        x, y, w, h = best.box
+        patch = frame[y:y + h, x:x + w].astype(np.int16)
+        if np.abs(patch - best_t.astype(np.int16)).mean() > color_tol:
+            return None
     best.score = round(best.score, 3)
     return best

@@ -1,0 +1,6 @@
+{
+  "rules": [
+    { "name": "alarm_popup", "type": "target", "target": "alarm_title",
+      "severity": "critical", "action": "handler", "handler": "ack_alarm", "cooldown": 0.5 }
+  ]
+}

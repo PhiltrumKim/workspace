@@ -36,6 +36,7 @@ class SimWorld:
         self.accel = accel
         self.noise = noise
         self.desktop_icon = desktop_icon
+        self.signal = True              # False: 영상 끊김(검은 화면) 재현
         self.rng = np.random.default_rng(seed)
         self.cx, self.cy = self.w / 2, self.h / 2   # 커서(화면 좌표)
         self.buttons = 0
@@ -55,6 +56,8 @@ class SimWorld:
                 self.app.click(int(self.cx), int(self.cy), bit)
 
     def render(self) -> np.ndarray:
+        if not self.signal:
+            return np.zeros((self.h, self.w, 3), np.uint8)
         img = self.app.render()
         if self.desktop_icon:
             self._draw_icon(img)

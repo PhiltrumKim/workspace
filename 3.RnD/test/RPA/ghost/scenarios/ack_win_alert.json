@@ -1,0 +1,10 @@
+{
+  "ghost": 1,
+  "name": "ack_win_alert",
+  "description": "Windows 경고 팝업(⚠) 확인 버튼 클릭 후 사라짐 확인",
+  "steps": [
+    { "action": "screenshot", "label": "warning_popup" },
+    { "action": "click", "target": "alert_ok", "label": "확인",
+      "expect": { "gone": "warn_icon", "timeout": 3 }, "retry": 1 }
+  ]
+}

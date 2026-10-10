@@ -71,9 +71,18 @@ class DemoEquipmentApp:
         self.alarm: Optional[str] = None
         self.shift = False
         self.events: List[str] = []
+        self._scheduled: List[Tuple[float, str]] = []   # (발생 시각, 메시지) — 실행 중 알람 재현용
 
     # ------------------------------------------------------------ 상태
+    def schedule_alarm(self, delay: float, msg: str):
+        """delay 초 뒤 알람 팝업 발생 (감시 기능 테스트용)."""
+        self._scheduled.append((time.monotonic() + delay, msg))
+
     def _tick(self):
+        now = time.monotonic()
+        for item in [x for x in self._scheduled if x[0] <= now]:
+            self._scheduled.remove(item)
+            self.trigger_alarm(item[1])
         if self.run_state == "running" and time.monotonic() - self.run_t0 >= self.run_duration:
             self.run_state = "done"
             self.events.append(f"DONE {self.selected} lot={self.lot}")

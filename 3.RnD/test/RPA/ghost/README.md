@@ -82,6 +82,38 @@ python -m ghost run scenarios/my_job.json
 모든 스텝 공통: `label`, `retry`, `expect: {"visible"|"gone": target, "timeout": s}` (사후조건 — 실패 시 retry).
 레거시 `magewell_rpa` workflow/recipe 는 자동 변환되어 읽힌다 (`python -m ghost migrate --legacy ../magewell_rpa --out legacy`).
 
+## 감시 (Surveillance)
+
+실행 중(스텝 사이, `wait`/`wait_for` 대기 중) 또는 단독(`python -m ghost watch rules.json`)으로 화면을 감시한다.
+규칙 파일 `{"rules": [...]}` 또는 시나리오의 `"watch"` 에 정의한다. 예: `scenarios/watch_win_alert.json`.
+
+| type | 탐지 | 필드 |
+|---|---|---|
+| target | 템플릿이 화면에 나타남 (알람·에러 팝업) | target, region? |
+| no_signal | 영상 끊김 (화면 전체가 거의 단색) | max_std? |
+| frozen | 영역 화면이 N초간 변하지 않음 (SW 멈춤) | region, seconds |
+
+| action | 동작 |
+|---|---|
+| notify | 로그·블랙박스 기록, `notify.webhook` 설정 시 JSON POST (Teams/Slack 수신 웹훅 등) |
+| stop | 즉시 중단, 화면 기록, 시나리오의 `on_abort` 안전 복귀 시나리오 실행 |
+| handler | 처리 시나리오 실행 후 작업 계속. 해소되지 않으면 최대 5회 후 중단 |
+
+이벤트는 상태가 바뀔 때만 나온다: appeared(발생) / cleared(해소).
+
+**주의**: 팝업이 끼어들면 직전 클릭이 팝업에 막혀 유실될 수 있다. 실행기는 클릭했다는 것만 알고, 반영됐는지는 모른다.
+결과가 중요한 스텝에는 반드시 `expect` 로 화면 확인을 넣어 재시도되게 한다 (`scenarios/sim/demo_run_watched.json`).
+
+실장비 예제: `scenarios/hw_watch_demo.json` — 작업 중 Windows 경고 팝업(⚠) 발생 → 탐지 → `ack_win_alert` 로 확인 클릭 → 작업 계속 (3/3 성공).
+
+## 템플릿 매칭과 색 검증
+
+`TM_CCOEFF_NORMED` 는 밝기·색 평균을 빼고 비교한다. 그래서 **배경색만 다른 상태를 구분하지 못한다**.
+예: 선택된 행과 선택되지 않은 행이 0.956 으로 매칭된다.
+
+선택 표시, 상태 램프, 경고 아이콘처럼 색이 의미를 갖는 target 에는 `color_tol` 을 지정한다.
+매칭 위치의 평균 색 차이가 이 값을 넘으면 불일치로 판정한다 (`add-target --color-tol 25`).
+
 ## 커서 제어 방식
 
 RelayBoard 는 상대 이동만 지원한다. 그래서 다음 순서로 절대 좌표처럼 다룬다.
@@ -103,9 +135,9 @@ Windows 대상은 **'포인터 정확도 향상'(마우스 가속)을 끄는 것
 
 ## 다음 단계 (로드맵)
 
-1. ~~기반 정리 + 시뮬레이터~~ ← 현재
+1. ~~기반 정리 + 시뮬레이터~~
 2. 조작 신뢰성
-   - 실장비(Windows 대상) 커서·키보드 검증
+   - ~~실장비(Windows 대상) 커서·키보드 검증~~
    - 속도 구간별 이득 학습
    - 드래그·스크롤
 3. 인식 강화
@@ -113,9 +145,10 @@ Windows 대상은 **'포인터 정확도 향상'(마우스 가속)을 끄는 것
    - 화면 상태 판별
    - 다중 매칭
 4. 감시
-   - 알람·에러 팝업 상시 감시 루프와 알림
-   - 이상 시 안전 정지
-   - 블랙박스 영상 기록
+   - ~~알람·에러 팝업 상시 감시 루프와 알림~~ (target / no_signal / frozen, 웹훅)
+   - ~~이상 시 안전 정지~~ (stop + on_abort)
+   - 블랙박스 영상 기록 (현재는 이벤트 시점 프레임만 저장)
+   - 알림 채널 실연동 (Teams/Slack/ATOMS)
 5. 연동
    - ATOMS 연동 인터페이스
    - TX(C++/엣지 장비) 탑재 전략

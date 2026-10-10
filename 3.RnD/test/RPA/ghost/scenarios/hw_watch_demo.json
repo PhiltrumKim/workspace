@@ -1,0 +1,15 @@
+{
+  "ghost": 1,
+  "name": "hw_watch_demo",
+  "description": "실장비 감시 데모: 작업 중 Windows 경고 팝업 발생 → 감시가 탐지해 자동 확인 → 작업 계속 (Win7 대상)",
+  "watch": "watch_win_alert.json",
+  "steps": [
+    { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창",
+      "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+    { "action": "type", "text": "mshta \"javascript:alert('GHOST ALARM TEST');close()\"", "label": "가짜 알람 팝업 명령" },
+    { "action": "key", "key": "enter" },
+    { "action": "wait", "sec": 8, "label": "작업 대기 (이 사이 감시가 팝업 처리)" },
+    { "action": "wait_gone", "target": "warn_icon", "timeout": 1, "label": "팝업 해소 확인" },
+    { "action": "screenshot", "label": "after" }
+  ]
+}

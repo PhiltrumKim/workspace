@@ -53,6 +53,11 @@ DEFAULTS = {
         "frame_on_fail": True,
         "frame_every_step": False,
     },
+    # 감시 알림: webhook 에 URL 을 넣으면 min_severity 이상 이벤트를 JSON POST (Teams/Slack 등 수신 웹훅)
+    "notify": {
+        "webhook": None,
+        "min_severity": "warning",
+    },
     # --sim 실행 시 가상 장비 특성 (실장비에서 관찰된 비이상성을 기본값으로 재현)
     "simulator": {
         "offset": [48, 48],

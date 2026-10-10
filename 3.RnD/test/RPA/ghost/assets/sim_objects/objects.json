@@ -74,5 +74,26 @@
     "file": "alarm_ok.png",
     "w": 200,
     "h": 60
+  },
+  "rcp_a_sel": {
+    "file": "rcp_a_sel.png",
+    "w": 700,
+    "h": 60,
+    "threshold": 0.9,
+    "color_tol": 25
+  },
+  "rcp_b_sel": {
+    "file": "rcp_b_sel.png",
+    "w": 700,
+    "h": 60,
+    "threshold": 0.9,
+    "color_tol": 25
+  },
+  "rcp_c_sel": {
+    "file": "rcp_c_sel.png",
+    "w": 700,
+    "h": 60,
+    "threshold": 0.9,
+    "color_tol": 25
   }
 }

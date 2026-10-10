@@ -4,7 +4,7 @@
   "description": "레시피 RCP_B 선택 → LOT ID 입력 → START → 완료 대기 (시뮬레이터 데모)",
   "steps": [
     { "action": "click", "target": "nav_recipe", "label": "레시피 화면" },
-    { "action": "click", "target": "rcp_b", "label": "RCP_B 선택", "retry": 1 },
+    { "action": "click", "target": "rcp_b", "label": "RCP_B 선택", "expect": { "visible": "rcp_b_sel", "timeout": 2 }, "retry": 2 },
     { "action": "click", "target": "nav_run", "label": "실행 화면", "expect": { "visible": "start_btn", "timeout": 2 } },
     { "action": "click", "target": "lot_label", "label": "LOT ID 입력칸" },
     { "action": "type", "text": "LOT-2026A_01" },

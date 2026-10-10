@@ -6,7 +6,8 @@ objects.json 항목:
    "threshold": 0.8,            (선택) 매칭 임계값
    "region": [x, y, w, h],      (선택) 탐색 영역 제한
    "click_offset": [dx, dy],    (선택) 매칭 중심 대비 클릭 위치 보정
-   "hint": [x, y]}              (선택) 템플릿 미검출 시 폴백 좌표 (스텝에 allow_hint 필요)
+   "hint": [x, y],              (선택) 템플릿 미검출 시 폴백 좌표 (스텝에 allow_hint 필요)
+   "color_tol": 25}             (선택) 색 검증 허용치 — 배경색으로 상태를 구분하는 target 에 사용
 레거시(magewell_rpa) objects.json 의 "click" 키는 hint 로 읽는다.
 """
 from __future__ import annotations
