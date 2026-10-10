@@ -25,17 +25,32 @@ def build_device(cfg: dict, sim: bool = False, world=None,
                                               run_duration=s["run_duration"]),
                              offset=tuple(s["offset"]), gain=tuple(s["gain"]), accel=s["accel"],
                              noise=s["noise"])
-        return Device(SimVideo(world), SimHid(world), cfg, log=log)
+        return Device(_maybe_hub(SimVideo(world), cfg, log), SimHid(world), cfg, log=log)
     from .hal.capture import CaptureVideo
     from .hal.relayboard import RelayBoard
     hw = cfg["hardware"]
     video = CaptureVideo(hw["camera"], hw["width"], hw["height"], hw["backend"])
     hid = RelayBoard(hw["port"], hw["baudrate"], log=log)
-    return Device(video, hid, cfg, log=log)
+    return Device(_maybe_hub(video, cfg, log), hid, cfg, log=log)
+
+
+def _maybe_hub(video, cfg: dict, log):
+    """영상 녹화가 켜져 있으면 캡처를 FrameHub 스레드가 전담하게 감싼다."""
+    v = cfg["blackbox"].get("video", {})
+    if cfg["blackbox"]["enabled"] and v.get("enabled"):
+        from .hal.hub import FrameHub
+        return FrameHub(video, max_fps=v.get("max_fps", 30), log=log)
+    return video
 
 
 def build_runner(cfg: dict, device: Device, log: Optional[Callable[[str], None]] = None):
     from .scenario import Runner
     reg = Registry(config.path(cfg, "objects"))
-    bb = Blackbox(config.path(cfg, "runs")) if cfg["blackbox"]["enabled"] else NullBlackbox()
+    recorder = None
+    from .hal.hub import FrameHub
+    if isinstance(device.video, FrameHub):
+        from .recorder import VideoRecorder
+        recorder = VideoRecorder(cfg["blackbox"]["video"], log=log)
+        device.video.listeners.append(recorder.on_frame)
+    bb = Blackbox(config.path(cfg, "runs"), recorder) if cfg["blackbox"]["enabled"] else NullBlackbox()
     return Runner(device, reg, cfg, blackbox=bb, log=log)

@@ -55,6 +55,18 @@ DEFAULTS = {
         "enabled": True,
         "frame_on_fail": True,
         "frame_every_step": False,
+        # 영상: 캡처를 FrameHub 스레드가 전담하고, 이벤트(스텝 실패·감시·중단) 전후를 클립으로 저장
+        "video": {
+            "enabled": True,
+            "fps": 5,                   # 녹화 프레임레이트
+            "pre_seconds": 10,          # 이벤트 이전 보관 시간
+            "post_seconds": 5,          # 이벤트 이후 추가 녹화 시간
+            "scale": 0.5,               # 축소 배율 (1920x1080 → 960x540)
+            "jpeg_quality": 70,
+            "continuous": False,        # True: 실행 전체를 run.mp4 로도 녹화
+            "clip_min_severity": "warning",   # 이 등급 이상 감시 이벤트에서 클립 저장
+            "max_fps": 30,              # FrameHub 캡처 상한
+        },
     },
     # OCR: rec_model 디렉터리(inference.onnx + dict.txt). 없으면 기본(중/영) 모델로 동작
     "ocr": {
@@ -81,6 +93,7 @@ DEFAULTS = {
 
 # 시뮬레이터는 캡처 지연이 없으므로 대기 시간을 줄인다
 SIM_OVERRIDES = {
+    "blackbox": {"video": {"enabled": False}},     # 시뮬레이터 기본은 영상 끔 (테스트에서 필요 시 켬)
     "timing": {"move_step": 0.0, "capture_latency": 0.0, "jiggle_settle": 0.0, "click_hold": 0.0, "click_settle": 0.05,
                "key_hold": 0.0, "key_gap": 0.0, "poll": 0.05},
 }

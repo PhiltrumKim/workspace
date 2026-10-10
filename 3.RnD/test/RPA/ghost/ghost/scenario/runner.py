@@ -14,7 +14,7 @@ from ..device import Device
 from ..hal.base import LEFT, RIGHT
 from ..locator import Locator, describe as tdesc
 from ..registry import Registry
-from ..surveillance import Notifier, Surveillance, WatchEvent, validate_rules
+from ..surveillance import SEVERITY, Notifier, Surveillance, WatchEvent, validate_rules
 from ..vision import Match
 from . import model
 
@@ -94,6 +94,9 @@ class Runner:
             self.notifier(ev, self._name)
             if ev.kind != "appeared":
                 continue
+            vcfg = self.cfg["blackbox"].get("video", {})
+            if SEVERITY[ev.severity] >= SEVERITY.get(vcfg.get("clip_min_severity", "warning"), 1):
+                self.bb.clip(f"watch_{ev.rule}", ev.detail)
             if ev.action == "stop":
                 self.bb.frame(frame, f"WATCH_{ev.rule}")
                 raise WatchAbort(ev)
@@ -237,6 +240,7 @@ class Runner:
             res.ok, res.aborted_by = False, e.ev.rule
             self.log(f"■ {e}")
             self.bb.event("abort", rule=e.ev.rule, reason=str(e))
+            self.bb.clip(f"abort_{e.ev.rule}", str(e))
             self._on_abort(sc, res)
         except Exception as e:                  # 장비 오류 등: 기록하고 안전하게 종료
             self.log(f"✖ 실행 중단: {e!r}")
@@ -298,6 +302,7 @@ class Runner:
             self._tick()
             idx = f"{prefix}{i}"
             desc = model.describe(st)
+            self.bb.annotate(f"[{idx}] {model.describe({**st, 'label': None})}")   # 영상 표시는 ASCII 라 한글 라벨 제외
             t0 = time.monotonic()
             ok, msg = self._attempt(st, res, idx, depth)
             sr = StepResult(idx, st["action"], desc, ok, msg, round(time.monotonic() - t0, 2))
@@ -306,6 +311,8 @@ class Runner:
                           elapsed=sr.elapsed, cursor=self.dev.pos)
             self.log(f"  [{idx}] {'✓' if ok else '✗'} {desc} → {msg}")
             bbc = self.cfg["blackbox"]
+            if not ok:
+                self.bb.clip(f"step{idx}_FAIL", msg)
             if (not ok and bbc["frame_on_fail"]) or bbc["frame_every_step"]:
                 try:
                     self.bb.frame(self.dev.frame(), f"step{idx}_{'ok' if ok else 'FAIL'}")
