@@ -24,7 +24,7 @@
     { "action": "move", "x": 1300, "y": 600, "label": "커서를 표시창 밖으로" },
     { "action": "read", "name": "elapsed_s", "region": [1140, 20, 770, 240], "vote": true,
       "pattern": "^00:00:(\\d\\d\\.\\d\\d)$", "min": 5.0, "max": 20.0,
-      "label": "경과 시간 판독 (대기 5s + 메뉴 OCR 확인 시간 포함, 실측 ~14s)" },
+      "label": "경과 시간 판독 (대기 5s + 메뉴 조작·확인 시간 포함, 실측 ~11s)" },
 
     { "action": "right_click", "target": "xn_display",
       "expect": { "visible": "menu_reset", "timeout": 3 }, "retry": 1 },

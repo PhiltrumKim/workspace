@@ -6,7 +6,9 @@ target 지정 방법
   {"text": "저장 안 함", "region": [x,y,w,h],    텍스트(OCR) — 인라인 지정
    "match": "contains", "scale": 2,             match: exact | contains(기본) | regex | fuzzy
    "line": true,                                line: 영역을 한 줄로 바로 인식 (좁은 버튼·수치창, 생략 시 높이≤40 자동)
-   "vote": true}                                vote: 다수결 판독 결과로 비교 (세그먼트 숫자 표시창)
+   "vote": true,                                vote: 다수결 판독 결과로 비교 (세그먼트 숫자 표시창)
+   "anchor": "dlg_title", "offset": [dx,dy,w,h]} anchor: 다른 target(보통 빠른 템플릿)을 먼저 찾고 그 좌상단 기준
+                                                상대 영역에서만 OCR — 위치가 바뀌는 대화상자도 작은 영역 OCR 로 빠르게
 
 레지스트리(objects.json)에 템플릿 대신 "text" 를 가진 항목을 두면 이름으로도 텍스트 target 을 쓸 수 있다.
   "dont_save": {"text": "저장 안 함", "region": [900, 500, 200, 60]}
@@ -58,12 +60,25 @@ class Locator:
             return f"target 형식 오류: {target!r}"
         if target.get("match", "contains") not in MODES:
             return f"알 수 없는 match '{target.get('match')}'"
+        if target.get("anchor"):
+            if len(target.get("offset", [])) != 4:
+                return "anchor 사용 시 offset [dx,dy,w,h] 필요"
+            return self.validate(target["anchor"])
         return None
 
     def locate(self, target: Target, frame: np.ndarray, **overrides) -> Optional[Match]:
         spec = {**self.spec(target), **{k: v for k, v in overrides.items() if v is not None}}
         region = tuple(spec["region"]) if spec.get("region") else None
+        if is_text_spec(spec) and spec.get("anchor"):
+            a = self.locate(spec["anchor"], frame)
+            if a is None:
+                return None
+            dx, dy, w, h = spec["offset"]
+            region = (a.box[0] + dx, a.box[1] + dy, w, h)
         if is_text_spec(spec):
+            if region is None and not getattr(self, "_warned", {}).get(str(target)):
+                self._warned = {**getattr(self, "_warned", {}), str(target): True}
+                self.log(f"[ocr] {describe(target)}: region/anchor 없음 → 전체 화면 OCR (~2.6s). 영역 지정 권장")
             hit = self.ocr.find_text(frame, spec["text"], region=region, mode=spec.get("match", "contains"),
                                      min_ratio=spec.get("min_ratio", 0.9), scale=spec.get("scale"),
                                      line=spec.get("line"), vote=spec.get("vote", False))

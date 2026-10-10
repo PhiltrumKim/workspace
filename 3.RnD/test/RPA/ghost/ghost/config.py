@@ -58,6 +58,8 @@ DEFAULTS = {
         "rec_model": "models/korean_PP-OCRv5_mobile_rec",
         "scale": 1.0,
         "min_conf": 0.5,
+        "det_limit_type": "max",       # 검출 입력 크기 기준: max=긴 변 제한(빠름) / min=짧은 변 확대(RapidOCR 기본, 느림)
+        "det_limit_side_len": 960,
     },
     # 감시 알림: webhook 에 URL 을 넣으면 min_severity 이상 이벤트를 JSON POST (Teams/Slack 등 수신 웹훅)
     "notify": {

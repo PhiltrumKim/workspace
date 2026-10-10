@@ -123,7 +123,14 @@
   },
   "xn_remind_later": {
     "text": "Remind me later",
-    "match": "contains"
+    "match": "contains",
+    "anchor": "xn_nag_title",
+    "offset": [
+      375,
+      58,
+      110,
+      30
+    ]
   },
   "xn_nag_title": {
     "file": "xn_nag_title.png",

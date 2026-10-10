@@ -5,7 +5,9 @@
 한국어 인식 모델(PaddlePaddle korean_PP-OCRv5_mobile_rec, Apache-2.0)을 `python -m ghost fetch-models` 로 받아 쓴다.
 ONNX 모델이라 TX 엣지 장비(C++ onnxruntime)로 이식할 수 있다.
 
-속도(1080p, CPU): 전체 화면 ~2s, 잘라낸 영역 ~0.5s → region 을 지정해서 쓰는 것이 기본.
+속도(1080p, CPU): 잘라낸 영역 0.1~0.7s, 전체 화면 ~2.6s → region 을 지정해서 쓰는 것이 기본.
+RapidOCR 기본 검출 설정(limit_type=min, 736)은 작은 영역을 짧은 변 736px 까지 확대해서 검출이 느리다
+(메뉴 영역 812ms 중 검출 626ms). 긴 변 기준(max)으로 바꾸고 각도 분류(cls)를 끄면 80ms (정확도 동일).
 작은 글씨는 scale(확대 배율)을 2 정도로 주면 인식률이 오른다.
 
 한 줄 모드(line): 버튼·수치 표시창처럼 글자 한 줄만 있는 좁은 영역은 검출 단계를 건너뛰고 영역 전체를
@@ -89,16 +91,18 @@ class OcrEngine:
         rec = self.cfg.get("rec_model", KOREAN_MODEL_DIR)
         rec_dir = rec if os.path.isabs(rec) else os.path.join(self.base_dir, rec)
         onnx, keys = os.path.join(rec_dir, "inference.onnx"), os.path.join(rec_dir, "dict.txt")
+        det = {"det_limit_type": self.cfg.get("det_limit_type", "max"),
+               "det_limit_side_len": self.cfg.get("det_limit_side_len", 960)}
         if os.path.exists(onnx) and os.path.exists(keys):
-            key = os.path.abspath(onnx)
+            key = (os.path.abspath(onnx), det["det_limit_type"], det["det_limit_side_len"])
             if key not in _ENGINES:                 # 모델 로딩(~1s)은 프로세스당 한 번
-                _ENGINES[key] = RapidOCR(rec_model_path=onnx, rec_keys_path=keys)
+                _ENGINES[key] = RapidOCR(rec_model_path=onnx, rec_keys_path=keys, **det)
             self._engine = _ENGINES[key]
             self.model = os.path.basename(rec_dir)
         else:
             self.log(f"[ocr] 한국어 인식 모델 없음({rec_dir}) → 기본 모델(중/영) 사용. "
                      "한글 인식은 'python -m ghost fetch-models' 후 가능")
-            self._engine = RapidOCR()
+            self._engine = RapidOCR(**det)
             self.model = "rapidocr-default"
 
     def read(self, frame: np.ndarray, region: Optional[Sequence[int]] = None,
@@ -132,7 +136,7 @@ class OcrEngine:
             if line:
                 result, _ = self._engine(img, use_det=False, use_cls=False)
             else:
-                result, _ = self._engine(img)
+                result, _ = self._engine(img, use_cls=False)   # UI 글자는 회전되지 않으므로 각도 분류 생략
         min_conf = self.cfg.get("min_conf", 0.5)
         if line:
             box = (ox, oy, int(img.shape[1] / s), int(img.shape[0] / s))
@@ -217,11 +221,17 @@ def group_lines(hits: List[TextHit]) -> List[TextHit]:
 
 
 def _ink_box(img: np.ndarray, pad: int = 6, diff: int = 40) -> Tuple[int, int, int, int]:
-    """배경(테두리 픽셀 중앙값)과 다른 픽셀의 외접 사각형 + 여백. 없으면 전체."""
+    """배경(테두리 픽셀 중앙값)과 다른 픽셀의 외접 사각형 + 여백. 없으면 전체.
+    버튼 테두리·구분선처럼 행/열 대부분을 가로지르는 선은 글자가 아니므로 제외한다
+    (포함하면 글자 높이를 크게 잡아 배율이 부족해진다: 'Remind me later' → 'Remin me later')."""
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
     border = np.concatenate([g[0], g[-1], g[:, 0], g[:, -1]])
-    ys, xs = np.nonzero(np.abs(g.astype(np.int16) - int(np.median(border))) > diff)
+    mask = np.abs(g.astype(np.int16) - int(np.median(border))) > diff
     h, w = g.shape
+    if h > 4 and w > 4:
+        mask[mask.mean(axis=1) > 0.7, :] = False      # 가로선
+        mask[:, mask.mean(axis=0) > 0.7] = False      # 세로선
+    ys, xs = np.nonzero(mask)
     if len(xs) == 0:
         return (0, 0, w, h)
     x0, y0 = max(0, xs.min() - pad), max(0, ys.min() - pad)
