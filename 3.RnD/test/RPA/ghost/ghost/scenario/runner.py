@@ -2,6 +2,7 @@
 """시나리오 실행기: 스텝 실행 + 사후조건 확인 + 재시도 + 블랙박스 기록."""
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
@@ -73,6 +74,8 @@ class Runner:
         self._handler_last: dict = {}
         self._res: Optional[RunResult] = None
         self._name = ""
+        self.on_step: Optional[Callable[[StepResult], None]] = None   # 스텝 완료 알림 (편집기 진행 표시용)
+        self._last_box: dict = {}                                         # target 별 마지막 발견 위치
 
     # ------------------------------------------------------------ 감시
     def _set_watch(self, rules: List[dict]) -> None:
@@ -149,13 +152,51 @@ class Runner:
         except FileNotFoundError as e:
             raise StepFailed(str(e))
 
+    @staticmethod
+    def _tkey(target) -> str:
+        return target if isinstance(target, str) else json.dumps(target, sort_keys=True, ensure_ascii=False)
+
+    def _clear_cursor(self, target) -> bool:
+        """커서가 target 의 검색 영역·마지막 발견 위치·등록 위치를 가리고 있으면 바깥으로 치운다.
+        (가린 채로 찾으면 OCR·템플릿이 실패하고, '사라짐' 확인은 거짓 성공할 수 있다)"""
+        if not self.cfg["cursor"].get("auto_park", True):
+            return False
+        try:
+            spec = self.loc.spec(target)
+        except KeyError:
+            return False
+        boxes = []
+        if spec.get("region"):
+            boxes.append(spec["region"])
+        if self._last_box.get(self._tkey(target)):
+            boxes.append(self._last_box[self._tkey(target)])
+        if "hint" in spec and spec.get("w"):
+            boxes.append([spec["hint"][0] - spec["w"] // 2, spec["hint"][1] - spec["h"] // 2, spec["w"], spec["h"]])
+        cx, cy = self.dev.pos
+        mg = 24                                       # 커서 그림 크기 여유
+        hit = next((b for b in boxes if b[0] - mg <= cx < b[0] + b[2] + mg and b[1] - mg <= cy < b[1] + b[3] + mg), None)
+        if hit is None:
+            return False
+        W, H = self.dev.video.size
+        x, y, w, h = hit
+        gap = mg + 30
+        for px, py in ((cx, y + h + gap), (cx, y - gap), (x + w + gap, cy), (x - gap, cy)):
+            if 10 <= px < W - 10 and 10 <= py < H - 10:
+                self.dev.move_to(px, py, verify=False)
+                time.sleep(self.cfg["timing"]["capture_latency"])
+                return True
+        return False
+
     def wait_for(self, target, timeout: float, gone: bool = False) -> Optional[Match]:
         """visible: 찾으면 Match 반환 / gone: 사라지면 None 반환. 시간 초과 시 StepFailed."""
         deadline = time.monotonic() + timeout
         while True:
+            self._clear_cursor(target)
             frame = self.dev.frame()
             self._tick(frame)
             m = self.find(target, frame)
+            if m is not None:
+                self._last_box[self._tkey(target)] = list(m.box)
             if (m is None) == gone:
                 return m
             if time.monotonic() >= deadline or self.stop_event.is_set():
@@ -307,6 +348,11 @@ class Runner:
             ok, msg = self._attempt(st, res, idx, depth)
             sr = StepResult(idx, st["action"], desc, ok, msg, round(time.monotonic() - t0, 2))
             res.steps.append(sr)
+            if self.on_step is not None:
+                try:
+                    self.on_step(sr)
+                except Exception:
+                    pass
             self.bb.event("step", index=idx, action=st["action"], desc=desc, ok=ok, message=msg,
                           elapsed=sr.elapsed, cursor=self.dev.pos)
             self.log(f"  [{idx}] {'✓' if ok else '✗'} {desc} → {msg}")
@@ -321,6 +367,31 @@ class Runner:
             if not ok:
                 return False
         return True
+
+    def run_step(self, st: dict, index: str = "편집") -> Tuple[StepResult, dict]:
+        """스텝 하나만 실행 (편집기의 '이 스텝 실행'). 감시·블랙박스 실행 기록 없이 재시도·사후조건은 적용.
+        반환: (결과, read 로 읽은 값)"""
+        desc = model.describe(st)
+        errs = model.validate({"name": "step", "steps": [st]}, self.reg)
+        if errs:
+            return StepResult(index, st.get("action", "?"), desc, False, "; ".join(errs), 0.0), {}
+        res = RunResult("step", ok=False)
+        saved, self._res, self.watch = self._res, res, None
+        self.stop_event.clear()
+        t0 = time.monotonic()
+        try:
+            ok, msg = self._attempt(st, res, index, 0)
+        except Exception as e:
+            ok, msg = False, f"오류: {e!r}"
+        finally:
+            self._res = saved
+            try:
+                self.dev.release_all_keys()
+            except Exception:
+                pass
+        sr = StepResult(index, st["action"], desc, ok, msg, round(time.monotonic() - t0, 2))
+        self.log(f"  [{index}] {'✓' if ok else '✗'} {desc} → {msg}")
+        return sr, res.values
 
     def _attempt(self, st: dict, res: RunResult, idx: str, depth: int) -> Tuple[bool, str]:
         tries = 1 + int(st.get("retry", 0))

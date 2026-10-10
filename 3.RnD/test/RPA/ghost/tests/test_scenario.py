@@ -99,3 +99,21 @@ def test_stop_event(cfg):
     threading.Timer(0.3, r.stop_event.set).start()
     res = r.run(sc)
     assert res.stopped and not res.ok
+
+
+def test_cursor_parked_off_text_target(cfg):
+    """커서가 글자 target 위에 있으면 OCR 이 실패하므로 찾기 전에 치운다 (편집기 E2E 에서 발견)."""
+    pytest = __import__("pytest")
+    pytest.importorskip("rapidocr_onnxruntime")
+    r, w = _runner(cfg)
+    tgt = {"text": "RCP_A", "region": [360, 180, 716, 76]}
+    r.dev.move_to(420, 222)                          # 'RCP_A' 글자 위
+    res = r.run({"ghost": 1, "name": "park", "steps": [{"action": "wait_for", "target": tgt, "timeout": 1}]})
+    assert res.ok
+    cx, cy = r.dev.pos
+    assert not (336 <= cx < 1100 and 156 <= cy < 280)
+    cfg["cursor"]["auto_park"] = False
+    r2, w2 = _runner(cfg)
+    r2.dev.move_to(420, 222)
+    res2 = r2.run({"ghost": 1, "name": "nopark", "steps": [{"action": "wait_for", "target": tgt, "timeout": 0.5}]})
+    assert not res2.ok                               # 치우지 않으면 가려서 실패 (문제 재현)

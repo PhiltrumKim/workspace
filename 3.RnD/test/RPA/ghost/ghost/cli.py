@@ -9,6 +9,7 @@
   python -m ghost probe [--smoke]                                COM 포트/캡처 확인 (+홈잉·커서 실측, 클릭 없음)
   python -m ghost watch rules.json [--duration 60]               화면 상시 감시 (시나리오 없이)
   python -m ghost run my.json --watch rules.json                 실행 중 추가 감시 규칙 적용
+  python -m ghost editor [--sim]                                 시나리오 편집기 (http://127.0.0.1:8765)
   python -m ghost fetch-models                                   한국어 OCR 모델 다운로드
   python -m ghost ocr [shot.png] [--region x,y,w,h]              화면 글자/좌표 출력 (target·read 영역 잡기용)
   python -m ghost add-target NAME --text "저장 안 함" [--box ..]   텍스트(OCR) target 등록
@@ -232,6 +233,24 @@ def cmd_add_target(args) -> int:
     return 0
 
 
+def cmd_editor(args) -> int:
+    from .editor import EditorApp, serve
+    cfg = _cfg(args, sim=args.sim)
+    app = EditorApp(cfg, sim=args.sim)
+    _log(f"[편집기] 장치 연결 중 ({'시뮬레이터' if args.sim else '실장비 ' + cfg['hardware']['port']})...")
+    app.open()
+    httpd = serve(app, args.port)
+    _log(f"[편집기] 브라우저에서 여세요: http://127.0.0.1:{args.port}   (종료: Ctrl+C)")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.shutdown()
+        app.close()
+    return 0
+
+
 def cmd_ocr(args) -> int:
     import cv2
     from .vision.ocr import OcrEngine
@@ -350,6 +369,11 @@ def main(argv=None) -> int:
     s.add_argument("--scale", type=float)
     s.add_argument("--sim", action="store_true")
     s.set_defaults(fn=cmd_ocr)
+
+    s = sub.add_parser("editor", help="시나리오 편집기 (로컬 웹)")
+    s.add_argument("--sim", action="store_true", help="시뮬레이터로 실행")
+    s.add_argument("--port", type=int, default=8765)
+    s.set_defaults(fn=cmd_editor)
 
     s = sub.add_parser("fetch-models", help="한국어 OCR 인식 모델 다운로드")
     s.add_argument("--force", action="store_true")

@@ -26,6 +26,7 @@ DEFAULTS = {
         "trust_after": 3,           # adaptive: 보정 없이 도착한 연속 횟수가 이 값 이상이면 실측 생략
         "verify_every": 5,          # adaptive: 생략 중에도 이 횟수마다 한 번은 실측
         "edge_margin": 16,          # adaptive: 화면 가장자리 이 범위 안으로 이동하면 항상 실측
+        "auto_park": True,          # 대상을 찾기 전에 커서가 대상 영역을 가리면 바깥으로 치움 (호버 메뉴 등에서는 False)
         "tolerance": 4,             # 허용 오차(px)
         "max_corrections": 3,
         "locate_window": 120,

@@ -22,6 +22,7 @@ ghost/
   recorder.py     블랙박스 영상 녹화기 (링 버퍼, 이벤트 전후 클립)
   hal/hub.py      FrameHub: 캡처 전담 스레드
   sim/            시뮬레이터: 가상 분석장비 SW + 가상 커서 (장비 없이 개발/테스트)
+  editor/         시나리오 편집기 (로컬 웹: server.py + static/)
   cli.py          python -m ghost ...
 scenarios/sim/    시뮬레이터 데모 시나리오
 assets/sim_objects/  시뮬레이터용 템플릿 (python -m ghost sim-assets 로 재생성)
@@ -41,6 +42,7 @@ py -3.9 -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 실장비 (Magewell + RelayBoard 연결 시):
 
 ```bash
+python -m ghost editor                # 시나리오 편집기 (브라우저 http://127.0.0.1:8765)
 python -m ghost probe                 # COM 포트 목록 + 캡처 확인
 python -m ghost probe --smoke         # 홈잉 + 3점 이동 + 커서 실측 (클릭 없음)
 python -m ghost snap shot.png         # 화면 저장
@@ -56,6 +58,40 @@ python -m ghost run scenarios/my_job.json
 
 설정은 `ghost.json` (COM 포트, 카메라 번호, 해상도, 경로). 기본값은 `ghost/config.py`.
 `--sim` 실행 시에는 `ghost.json` 의 `"sim"` 섹션이 덧씌워진다.
+
+## 시나리오 편집기
+
+코드를 몰라도 화면을 보며 시나리오를 만드는 로컬 웹 도구다.
+
+```bash
+python -m ghost editor          # 실장비
+python -m ghost editor --sim    # 시뮬레이터
+# → 브라우저에서 http://127.0.0.1:8765 (이 PC 에서만 접속 가능)
+```
+
+| 영역 | 할 수 있는 것 |
+|---|---|
+| 장비 화면 | 실시간 보기 / 화면 고정, **대상 지정**(드래그), **직접 조작**(클릭·우클릭·더블클릭·글자·키를 장비로 전송) |
+| 대상 탭 | 드래그한 영역을 그림 또는 글자(OCR) 대상으로 등록. OCR 이 읽은 글자를 미리 채우고, 등록 즉시 찾기 테스트(초록 상자) |
+| 시나리오 탭 | 불러오기·새로 만들기, 동작 목록에서 스텝 추가·편집·순서 변경, **스텝 하나만 시험 실행**, 저장 전 검증, 전체 실행·중지(진행 상황이 스텝마다 표시), JSON 직접 편집 |
+| 실행 기록 탭 | 실행별 스텝 결과·감시 이벤트·판독값, 실패 화면, 영상 클립 받기 |
+
+- 동작 이름은 사용자 언어로 표시한다 ("나타날 때까지 대기", "글자·수치 읽기" 등).
+- 결과가 중요한 스텝에는 "실행 후 확인"을 넣도록 폼에서 안내한다.
+- 장비 조작은 한 번에 하나다. 전체 실행 중에는 다른 조작을 거부한다 (409).
+- 외부 인터넷 자원(웹 폰트·CDN)을 쓰지 않아 현장 PC 에서 오프라인으로 동작한다.
+- 구현: 표준 라이브러리 HTTP 서버(`ghost/editor/server.py`) + 프레임워크 없는 HTML/JS(`ghost/editor/static/`).
+
+실장비 시연 (Edge 자동 조작):
+- 편집기에서 `xnote_measure` 를 불러와 전체 실행해 성공했다 (판독값 표시).
+- 바탕화면 '휴지통' 라벨을 드래그 → OCR 이 "휴지통" 을 채움 → 글자 대상 등록 → 찾기 점수 0.999 (77 ms).
+
+테스트:
+- `tests/test_editor_api.py` (API, 브라우저 없음)
+- `tests/test_editor_e2e.py` (설치된 Edge 를 Playwright 로 조작해 불러오기 → 스텝 시험 → 드래그 등록 → 스텝 추가 → 저장 → 전체 실행 → 기록 확인. 개발용으로 `pip install playwright` 필요하며, Py3.9 는 `greenlet==3.1.1` 고정. 없으면 건너뜀)
+
+편집기 E2E 에서 발견한 문제: 직전 클릭으로 커서가 대상 글자 위에 남으면 OCR 이 실패하고, '사라짐' 확인은 거짓 성공할 수 있었다.
+대상을 찾기 전에 커서가 그 대상의 영역을 가리면 바깥으로 치우도록 했다 (`cursor.auto_park`, 기본 켬. 호버로 열리는 계단식 메뉴에서는 끈다).
 
 ## 시나리오 형식 (v1)
 
