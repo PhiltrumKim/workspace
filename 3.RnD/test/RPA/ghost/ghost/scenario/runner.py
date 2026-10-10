@@ -329,6 +329,7 @@ class Runner:
                 return True, msg if n == 0 else f"{msg} (재시도 {n}회)"
             except StepFailed as e:
                 msg = str(e)
+                self.dev.distrust()               # 실패 원인이 커서 오차일 수 있으므로 다음 이동은 실측
                 if n + 1 < tries and not self.stop_event.is_set():
                     self.log(f"  [{idx}] 재시도 {n + 1}/{tries - 1}: {msg}")
         return False, msg

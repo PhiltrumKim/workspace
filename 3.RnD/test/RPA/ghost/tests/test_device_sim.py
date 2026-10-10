@@ -105,3 +105,58 @@ def test_move_and_locate_over_icon(cfg):
     for t in [(40, 40), (300, 300), (20, 70)]:
         p = d.move_to(*t)
         assert p == w.cursor_frame_pos(), (t, p)
+
+
+# ---------------------------------------------------------------- 적응형 확인 (실측 생략)
+PATH = [(400, 300), (900, 500), (1300, 700), (700, 900), (1500, 300), (500, 600), (1100, 250), (800, 800)]
+
+
+def test_adaptive_skips_after_trust(cfg):
+    d, w = _dev(cfg, offset=(48, 48))
+    d.home()
+    for t in PATH:
+        d.move_to(*t)
+        assert w.cursor_frame_pos() == t
+    n = cfg["cursor"]["trust_after"]
+    assert d.stats["verified"] >= n and d.stats["skipped"] > 0
+    assert d.stats["verified"] + d.stats["skipped"] == len(PATH)
+
+
+def test_adaptive_always_policy(cfg):
+    cfg["cursor"]["verify_moves"] = True
+    d, w = _dev(cfg, offset=(48, 48))
+    d.home()
+    for t in PATH:
+        d.move_to(*t)
+    assert d.stats["skipped"] == 0
+
+
+def test_adaptive_catches_drift_periodically(cfg):
+    """신뢰 상태에서 이득이 바뀌면(예: 포인터 속도 설정 변경) 주기 실측에서 잡아내고 다시 매번 실측."""
+    d, w = _dev(cfg, offset=(48, 48))
+    d.home()
+    for t in PATH[:4]:
+        d.move_to(*t)
+    assert d._streak >= cfg["cursor"]["trust_after"]
+    w.gain = (1.25, 1.25)
+    for t in PATH + PATH:
+        p = d.move_to(*t)
+    assert d.stats["corrections"] > 0
+    # 드리프트 감지 이후 마지막 이동들은 다시 정확해야 한다
+    assert abs(w.cursor_frame_pos()[0] - PATH[-1][0]) <= cfg["cursor"]["tolerance"]
+    assert abs(w.cursor_frame_pos()[1] - PATH[-1][1]) <= cfg["cursor"]["tolerance"]
+
+
+def test_adaptive_verifies_near_edge_and_after_distrust(cfg):
+    d, w = _dev(cfg, offset=(0, 0))
+    d.home()
+    for t in PATH[:4]:
+        d.move_to(*t)
+    v = d.stats["verified"]
+    d.move_to(1915, 540)                       # 가장자리
+    assert d.stats["verified"] == v + 1
+    d.move_to(900, 500)
+    d.distrust()
+    v = d.stats["verified"]
+    d.move_to(600, 600)
+    assert d.stats["verified"] == v + 1

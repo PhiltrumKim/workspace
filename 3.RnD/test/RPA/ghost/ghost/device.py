@@ -9,6 +9,10 @@ RelayBoard 는 상대 이동만 지원하므로 다음 방식으로 절대 좌�
 
 대상 PC 가 Windows 이면 '포인터 정확도 향상'(마우스 가속)을 끄는 것을 권장한다.
 켜져 있어도 폐루프 보정으로 수렴하지만 보정 횟수가 늘어난다.
+
+적응형 확인(verify_moves="adaptive", 기본): 실측 1회는 ~0.9s 로 클릭마다 하면 비싸다.
+보정 없이 허용오차 안에 도착한 이동이 trust_after 번 연속되면 이후 이동은 실측을 건너뛴다.
+단, verify_every 번마다 한 번, 화면 가장자리(edge_margin) 근처, 원점 재설정·스텝 실패(distrust) 후에는 다시 실측한다.
 """
 from __future__ import annotations
 
@@ -41,7 +45,9 @@ class Device:
         self.origin: Optional[Point] = None
         self.gain = [1.0, 1.0]            # 프레임 px / mickey (x, y)
         self._mods = 0
-        self.stats = {"moves": 0, "corrections": 0, "locate_fail": 0}
+        self._streak = 0                  # 보정 없이 허용오차 안에 도착한 연속 횟수
+        self._unverified = 0              # 마지막 실측 이후 실측 없이 한 이동 수
+        self.stats = {"moves": 0, "verified": 0, "skipped": 0, "corrections": 0, "locate_fail": 0}
 
     # ------------------------------------------------------------ 수명주기
     def open(self, home: bool = True) -> None:
@@ -115,12 +121,13 @@ class Device:
         settle = self.t["jiggle_settle"]
         time.sleep(self.t["capture_latency"])   # 직전 이동이 영상에 반영된 뒤 기준 프레임 확보
         for sgn in (1, -1):
+            if sgn < 0:
+                time.sleep(settle)                  # 되돌린 흔들기가 영상에 반영된 뒤 재시도
             a = self.frame()
             self._send(sgn * J, sgn * J)
             time.sleep(settle)
             b = self.frame()
-            self._send(-sgn * J, -sgn * J)
-            time.sleep(settle)
+            self._send(-sgn * J, -sgn * J)          # 되돌린 뒤에는 프레임을 안 쓰므로 기다리지 않는다
             box = self._diff_blob(a, b, near, win, corner)
             if box is None:
                 continue
@@ -172,8 +179,25 @@ class Device:
         else:
             self.pos, self.measured = p, True
         self.origin = self.pos
+        self.distrust()
         self.log(f"[device] home origin = {self.origin}")
         return self.pos
+
+    def distrust(self) -> None:
+        """다음 이동부터 다시 실측하게 한다 (스텝 실패, 원점 재설정 후)."""
+        self._streak = 0
+
+    def _need_verify(self, target: Point) -> bool:
+        policy = self.c["verify_moves"]
+        if policy is True or policy == "always":
+            return True
+        if policy is False or policy == "never":
+            return False
+        if self._streak < self.c["trust_after"] or self._unverified >= self.c["verify_every"] - 1:
+            return True
+        w, h = self.video.size
+        m = self.c["edge_margin"]                   # 가장자리: 커서가 화면 끝에 막혀 누적 오차가 생길 수 있음
+        return not (m <= target[0] < w - m and m <= target[1] < h - m)
 
     # ------------------------------------------------------------ 고수준 마우스
     def _learn_gain(self, start: Point, end: Point, mx: int, my: int) -> None:
@@ -184,15 +208,19 @@ class Device:
                     self.gain[axis] = 0.5 * self.gain[axis] + 0.5 * r
 
     def move_to(self, x: int, y: int, verify: Optional[bool] = None) -> Point:
-        verify = self.c["verify_moves"] if verify is None else verify
         target = (int(x), int(y))
+        verify = self._need_verify(target) if verify is None else verify
         start, start_measured = self.pos, self.measured
         dist = max(abs(target[0] - start[0]), abs(target[1] - start[1]))
         mx, my = self._move_by(target[0] - start[0], target[1] - start[1])
         self.pos, self.measured = target, False
         self.stats["moves"] += 1
         if not verify:
+            self._unverified += 1
+            self.stats["skipped"] += 1
             return self.pos
+        self._unverified = 0
+        self.stats["verified"] += 1
         tol = self.c["tolerance"]
         for i in range(self.c["max_corrections"] + 1):
             win = max(self.c["locate_window"], int(dist * 0.3) + 20)
@@ -201,11 +229,14 @@ class Device:
                 p = self.locate(near=target, win=-1)
             if p is None:
                 self.log(f"[device] move_to{target}: 커서 실측 실패 (추정 위치 유지)")
+                self._streak = 0
                 return self.pos
             if start_measured:
                 self._learn_gain(start, p, mx, my)
             self.pos, self.measured = p, True
             ex, ey = target[0] - p[0], target[1] - p[1]
+            if i == 0:                                # 계산만으로 도착했는지 → 신뢰도 갱신
+                self._streak = self._streak + 1 if abs(ex) <= tol and abs(ey) <= tol else 0
             if abs(ex) <= tol and abs(ey) <= tol:
                 return p
             if i == self.c["max_corrections"]:

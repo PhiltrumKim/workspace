@@ -22,7 +22,10 @@ DEFAULTS = {
         "home_search": 140,
         "jiggle": 8,                # 커서 위치 측정용 흔들기 크기
         "diff_threshold": 40,       # 프레임 차분 임계값(BGR 합)
-        "verify_moves": True,       # 이동 후 실측 보정(폐루프)
+        "verify_moves": "adaptive", # 이동 후 실측 보정: "adaptive"(기본) | True(항상) | False(안 함)
+        "trust_after": 3,           # adaptive: 보정 없이 도착한 연속 횟수가 이 값 이상이면 실측 생략
+        "verify_every": 5,          # adaptive: 생략 중에도 이 횟수마다 한 번은 실측
+        "edge_margin": 16,          # adaptive: 화면 가장자리 이 범위 안으로 이동하면 항상 실측
         "tolerance": 4,             # 허용 오차(px)
         "max_corrections": 3,
         "locate_window": 120,
@@ -30,8 +33,8 @@ DEFAULTS = {
     },
     "timing": {
         "move_step": 0.01,          # 마우스 패킷 간 추가 대기
-        "capture_latency": 0.3,     # 이동 → 캡처 영상 반영 지연 (Magewell 실측 ~0.16s + 프레임 읽기)
-        "jiggle_settle": 0.35,      # 흔들기 후 영상 반영 대기
+        "capture_latency": 0.2,     # 이동 → 캡처 영상 반영 지연 (Magewell 실측 ~0.16s; 0.15s 에서 이전 프레임 오측정 발생)
+        "jiggle_settle": 0.25,      # 흔들기 후 영상 반영 대기
         "click_hold": 0.06,
         "click_settle": 0.4,
         "key_hold": 0.03,
