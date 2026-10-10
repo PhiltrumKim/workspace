@@ -6,6 +6,7 @@
   gain   : mickey → 화면 px 배율 (OS 포인터 속도 설정)
   accel  : 이동 속도 비례 가속 (Windows '포인터 정확도 향상')
   noise  : 캡처 노이즈 표준편차
+  desktop_icon : 좌상단 바탕화면 아이콘 + 호버 하이라이트 (Windows 바탕화면 재현)
 """
 from __future__ import annotations
 
@@ -18,18 +19,23 @@ from ..hal.base import HidOutput, VideoSource
 from ..hal.relayboard import key_packet, mouse_packet
 from .app import DemoEquipmentApp
 
+# 바탕화면 아이콘 셀(화면 좌표). 커서가 들어오면 테두리 하이라이트 + 라벨 배경이 바뀐다
+ICON_CELL = (4, 2, 73, 87)
+ICON_LABEL = (14, 66, 52, 14)
+
 _CURSOR = np.array([(0, 0), (0, 17), (4, 13), (7, 20), (10, 19), (7, 12), (12, 12)], np.int32)
 
 
 class SimWorld:
     def __init__(self, app=None, offset: Tuple[int, int] = (0, 0), gain: Tuple[float, float] = (1.0, 1.0),
-                 accel: float = 0.0, noise: float = 0.0, seed: int = 0):
+                 accel: float = 0.0, noise: float = 0.0, seed: int = 0, desktop_icon: bool = False):
         self.app = app or DemoEquipmentApp()
         self.w, self.h = self.app.w, self.app.h
         self.offset = offset
         self.gain = gain
         self.accel = accel
         self.noise = noise
+        self.desktop_icon = desktop_icon
         self.rng = np.random.default_rng(seed)
         self.cx, self.cy = self.w / 2, self.h / 2   # 커서(화면 좌표)
         self.buttons = 0
@@ -50,6 +56,8 @@ class SimWorld:
 
     def render(self) -> np.ndarray:
         img = self.app.render()
+        if self.desktop_icon:
+            self._draw_icon(img)
         pts = _CURSOR + np.array([int(self.cx), int(self.cy)], np.int32)
         cv2.fillPoly(img, [pts], (255, 255, 255))
         cv2.polylines(img, [pts], True, (0, 0, 0), 1)
@@ -60,6 +68,17 @@ class SimWorld:
             n = self.rng.normal(0, self.noise, frame.shape)
             frame = np.clip(frame.astype(np.float32) + n, 0, 255).astype(np.uint8)
         return frame
+
+
+    def _draw_icon(self, img: np.ndarray) -> None:
+        x, y, w, h = ICON_CELL
+        lx, ly, lw, lh = ICON_LABEL
+        cv2.rectangle(img, (x, y), (x + w - 1, y + h - 1), (30, 30, 30), -1)
+        cv2.rectangle(img, (18, 12), (61, 55), (200, 120, 40), -1)          # 아이콘 그림
+        if x <= self.cx < x + w and y <= self.cy < y + h:                  # 호버
+            cv2.rectangle(img, (x, y), (x + w - 1, y + h - 1), (230, 190, 120), 1)
+            cv2.rectangle(img, (lx, ly), (lx + lw - 1, ly + lh - 1), (120, 80, 50), -1)
+        cv2.putText(img, "PC", (30, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (240, 240, 240), 1)
 
 
 class SimVideo(VideoSource):

@@ -78,3 +78,30 @@ def test_click_hits_widget(cfg):
     x, y, bw, bh = w.app.widgets()["nav_run"]
     d.click(x + bw // 2 + 48, y + bh // 2 + 48)
     assert w.app.page == "run"
+
+
+# ---------------------------------------------------------------- 회귀: 실장비(Win7) 바탕화면 아이콘 호버
+@pytest.mark.parametrize("home_expect", [(0, 0), (48, 48)])
+def test_home_ignores_desktop_icon_hover(cfg, home_expect):
+    """홈 위치에서 흔들면 아이콘 호버 하이라이트가 커서 흔적과 붙어 큰 덩어리가 되고,
+    라벨 배경 변화만 작은 덩어리로 남는다. 2026-10-10 실장비에서 원점을 (25,69)로 오측정했던 상황."""
+    cfg["cursor"]["home_expect"] = list(home_expect)
+    d, w = _dev(cfg, offset=(0, 0), desktop_icon=True)
+    assert d.home() == (0, 0)
+
+
+def test_blob_locate_alone_misreads_icon_hover(cfg):
+    """corner 모드 없이 일반 실측을 쓰면 라벨 변화를 커서로 오인한다 (corner 모드가 필요한 이유)."""
+    d, w = _dev(cfg, offset=(0, 0), desktop_icon=True)
+    d.home()
+    p = d.locate(near=(48, 48), win=140)
+    assert p is not None and p != (0, 0)
+
+
+def test_move_and_locate_over_icon(cfg):
+    """아이콘 셀 안팎으로 이동해도 실측이 실제 커서와 일치한다."""
+    d, w = _dev(cfg, offset=(0, 0), desktop_icon=True)
+    d.home()
+    for t in [(40, 40), (300, 300), (20, 70)]:
+        p = d.move_to(*t)
+        assert p == w.cursor_frame_pos(), (t, p)
