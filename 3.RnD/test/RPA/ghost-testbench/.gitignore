@@ -1,0 +1,4 @@
+shots/
+logs/
+dist/logs/
+*.pdb
