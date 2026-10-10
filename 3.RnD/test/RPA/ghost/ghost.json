@@ -1,0 +1,31 @@
+{
+  "hardware": {
+    "port": "COM3",
+    "camera": 0,
+    "width": 1920,
+    "height": 1080
+  },
+  "paths": {
+    "objects": "objects",
+    "scenarios": "scenarios",
+    "runs": "runs"
+  },
+  "sim": {
+    "paths": {
+      "objects": "assets/sim_objects",
+      "scenarios": "scenarios/sim"
+    },
+    "cursor": {
+      "home_expect": [
+        48,
+        48
+      ]
+    }
+  },
+  "cursor": {
+    "home_expect": [
+      0,
+      0
+    ]
+  }
+}

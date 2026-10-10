@@ -1,0 +1,78 @@
+{
+  "nav_recipe": {
+    "file": "nav_recipe.png",
+    "w": 240,
+    "h": 70
+  },
+  "nav_run": {
+    "file": "nav_run.png",
+    "w": 240,
+    "h": 70
+  },
+  "nav_log": {
+    "file": "nav_log.png",
+    "w": 240,
+    "h": 70
+  },
+  "rcp_a": {
+    "file": "rcp_a.png",
+    "w": 700,
+    "h": 60,
+    "threshold": 0.9
+  },
+  "rcp_b": {
+    "file": "rcp_b.png",
+    "w": 700,
+    "h": 60,
+    "threshold": 0.9
+  },
+  "rcp_c": {
+    "file": "rcp_c.png",
+    "w": 700,
+    "h": 60,
+    "threshold": 0.9
+  },
+  "lot_label": {
+    "file": "lot_label.png",
+    "w": 130,
+    "h": 60,
+    "threshold": 0.8,
+    "click_offset": [
+      330,
+      0
+    ]
+  },
+  "start_btn": {
+    "file": "start_btn.png",
+    "w": 200,
+    "h": 70
+  },
+  "status_idle": {
+    "file": "status_idle.png",
+    "w": 360,
+    "h": 56,
+    "threshold": 0.9
+  },
+  "status_running": {
+    "file": "status_running.png",
+    "w": 360,
+    "h": 56,
+    "threshold": 0.9
+  },
+  "status_done": {
+    "file": "status_done.png",
+    "w": 360,
+    "h": 56,
+    "threshold": 0.9
+  },
+  "alarm_title": {
+    "file": "alarm_title.png",
+    "w": 600,
+    "h": 56
+  },
+  "alarm_ok": {
+    "file": "alarm_ok.png",
+    "w": 200,
+    "h": 60
+  }
+}

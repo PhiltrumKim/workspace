@@ -1,0 +1,24 @@
+{
+  "ghost": 1,
+  "name": "hw_notepad_smoke",
+  "description": "실장비 키보드 스모크: Win+R → 메모장 실행 → 문자/기호 입력 → 저장 없이 종료 (Windows 대상, 영문 IME)",
+  "steps": [
+    { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창" },
+    { "action": "wait", "sec": 1.0 },
+    { "action": "type", "text": "notepad" },
+    { "action": "key", "key": "enter" },
+    { "action": "wait", "sec": 2.0 },
+    { "action": "key", "key": "enter" }, { "action": "key", "key": "enter" },
+    { "action": "key", "key": "enter" }, { "action": "key", "key": "enter" },
+    { "action": "key", "key": "enter" }, { "action": "key", "key": "enter" },
+    { "action": "type", "text": "GHOST runner smoke OK: Abc 123 !@#$%^&*()_+-=[]{};':\",./<>?" },
+    { "action": "wait", "sec": 0.8 },
+    { "action": "screenshot", "label": "typed" },
+    { "action": "hotkey", "keys": ["alt", "f4"], "label": "닫기" },
+    { "action": "wait", "sec": 1.0 },
+    { "action": "screenshot", "label": "save_dialog" },
+    { "action": "key", "key": "n", "label": "저장 안 함" },
+    { "action": "wait", "sec": 1.0 },
+    { "action": "screenshot", "label": "closed" }
+  ]
+}

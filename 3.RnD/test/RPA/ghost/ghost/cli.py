@@ -1,0 +1,226 @@
+# -*- coding: utf-8 -*-
+"""GHOST CLI.
+
+  python -m ghost run scenarios/demo_run_recipe.json --sim     시뮬레이터로 시나리오 실행
+  python -m ghost run my.json                                    실장비로 실행
+  python -m ghost validate scenarios/*.json                      시나리오 검증
+  python -m ghost sim-assets                                     시뮬레이터용 템플릿 생성
+  python -m ghost migrate --legacy ../magewell_rpa --out legacy  레거시 workflow/recipe/objects 변환
+  python -m ghost probe [--smoke]                                COM 포트/캡처 확인 (+홈잉·커서 실측, 클릭 없음)
+  python -m ghost snap shot.png                                  실장비 화면 1장 저장
+  python -m ghost add-target NAME --image shot.png --box x,y,w,h 스크린샷에서 target 등록
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import os
+import sys
+import time
+
+from . import build_device, build_runner, config
+from .registry import Registry
+from .scenario import model
+
+
+def _log(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def _cfg(args, sim=False):
+    return config.load(args.config, sim=sim)
+
+
+def cmd_run(args) -> int:
+    cfg = _cfg(args, sim=args.sim)
+    dev = build_device(cfg, sim=args.sim, log=_log)
+    runner = build_runner(cfg, dev, log=_log)
+    try:
+        sc = model.load(args.scenario, runner.reg)
+    except model.ScenarioError as e:
+        for err in e.errors:
+            _log(f"  ✗ {err}")
+        return 2
+    if os.path.dirname(os.path.abspath(args.scenario)) not in runner.scenario_dirs:
+        runner.scenario_dirs.insert(0, os.path.dirname(os.path.abspath(args.scenario)))
+    dev.open(home=not args.no_home)
+    try:
+        res = runner.run(sc)
+    except KeyboardInterrupt:
+        runner.stop_event.set()
+        return 130
+    finally:
+        dev.close()
+    _log(f"블랙박스: {res.run_dir}")
+    _log(f"커서 통계: {dev.stats}  gain={[round(g, 3) for g in dev.gain]}")
+    return 0 if res.ok else 1
+
+
+def cmd_validate(args) -> int:
+    cfg = _cfg(args, sim=args.sim)
+    reg = Registry(config.path(cfg, "objects"))
+    bad = 0
+    files = [f for pat in args.files for f in (glob.glob(pat) or [pat])]
+    for f in files:
+        try:
+            model.load(f, reg)
+            _log(f"✓ {f}")
+        except model.ScenarioError as e:
+            bad += 1
+            _log(f"✗ {f}")
+            for err in e.errors:
+                _log(f"    {err}")
+    return 1 if bad else 0
+
+
+def cmd_sim_assets(args) -> int:
+    from .sim import export_templates
+    cfg = _cfg(args, sim=True)
+    out = args.out or config.path(cfg, "objects")
+    names = export_templates(Registry(out))
+    _log(f"{len(names)}개 템플릿 → {out}: {', '.join(names)}")
+    return 0
+
+
+def cmd_migrate(args) -> int:
+    import shutil
+    src, out = args.legacy, args.out
+    os.makedirs(os.path.join(out, "scenarios"), exist_ok=True)
+    obj_src = os.path.join(src, "objects")
+    if os.path.isdir(obj_src):
+        shutil.copytree(obj_src, os.path.join(out, "objects"), dirs_exist_ok=True)
+        _log(f"objects 복사: {obj_src}")
+    n = 0
+    for sub in ("workflows", "recipes"):
+        for f in sorted(glob.glob(os.path.join(src, sub, "*.json"))):
+            import json
+            with open(f, encoding="utf-8") as fh:
+                old = json.load(fh)
+            try:
+                sc = model.from_legacy(old)
+            except model.ScenarioError as e:
+                _log(f"✗ {f}: {e}")
+                continue
+            model.save(sc, os.path.join(out, "scenarios", sc["name"] + ".json"))
+            n += 1
+    _log(f"{n}개 시나리오 변환 → {os.path.join(out, 'scenarios')}")
+    return 0
+
+
+def cmd_probe(args) -> int:
+    cfg = _cfg(args)
+    hw = cfg["hardware"]
+    try:
+        from serial.tools import list_ports
+        _log("[serial] " + (", ".join(f"{p.device}({p.description})" for p in list_ports.comports()) or "없음"))
+    except ImportError:
+        _log("[serial] pyserial 미설치")
+    from .hal.capture import CaptureVideo
+    cap = CaptureVideo(hw["camera"], hw["width"], hw["height"], hw["backend"])
+    try:
+        cap.open()
+        f = cap.read()
+        _log(f"[video] camera {hw['camera']} OK frame={f.shape[1]}x{f.shape[0]} mean={f.mean():.1f}")
+    except Exception as e:
+        _log(f"[video] camera {hw['camera']} 실패: {e}")
+        return 1
+    finally:
+        cap.close()
+    if not args.smoke:
+        return 0
+    # 스모크: 홈잉 + 커서 실측 + 클릭 없는 이동 검증
+    dev = build_device(cfg, log=_log)
+    dev.open(home=True)
+    try:
+        import cv2
+        w, h = hw["width"], hw["height"]
+        pts = [(w // 2, h // 2), (w // 4, h // 4), (3 * w // 4, h // 2)]
+        for p in pts:
+            t0 = time.monotonic()
+            got = dev.move_to(*p)
+            _log(f"[smoke] move_to{p} → {got} measured={dev.measured} ({time.monotonic() - t0:.1f}s)")
+        cv2.imwrite(args.out, dev.frame())
+        _log(f"[smoke] gain={[round(g, 3) for g in dev.gain]} stats={dev.stats} frame → {args.out}")
+    finally:
+        dev.close()
+    return 0
+
+
+def cmd_snap(args) -> int:
+    import cv2
+    from .hal.capture import CaptureVideo
+    hw = _cfg(args)["hardware"]
+    cap = CaptureVideo(hw["camera"], hw["width"], hw["height"], hw["backend"])
+    cap.open()
+    try:
+        cv2.imwrite(args.out, cap.read())
+    finally:
+        cap.close()
+    _log(f"saved {args.out}")
+    return 0
+
+
+def cmd_add_target(args) -> int:
+    import cv2
+    cfg = _cfg(args, sim=args.sim)
+    img = cv2.imread(args.image)
+    if img is None:
+        _log(f"이미지 읽기 실패: {args.image}")
+        return 1
+    x, y, w, h = (int(v) for v in args.box.split(","))
+    meta = {"threshold": args.threshold, "hint": [x + w // 2, y + h // 2]}
+    if args.offset:
+        meta["click_offset"] = [int(v) for v in args.offset.split(",")]
+    reg = Registry(config.path(cfg, "objects"))
+    reg.add(args.name, img[y:y + h, x:x + w].copy(), **meta)
+    _log(f"target '{args.name}' 등록 → {reg.root}")
+    return 0
+
+
+def main(argv=None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    p = argparse.ArgumentParser(prog="ghost", description="GHOST GUI 자동화 엔진")
+    p.add_argument("--config", help="설정 파일 (기본: ./ghost.json)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("run", help="시나리오 실행")
+    s.add_argument("scenario")
+    s.add_argument("--sim", action="store_true", help="시뮬레이터로 실행")
+    s.add_argument("--no-home", action="store_true", help="시작 시 홈잉 생략")
+    s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("validate", help="시나리오 검증")
+    s.add_argument("files", nargs="+")
+    s.add_argument("--sim", action="store_true", help="시뮬레이터 objects 기준으로 target 확인")
+    s.set_defaults(fn=cmd_validate)
+
+    s = sub.add_parser("sim-assets", help="시뮬레이터용 템플릿 생성")
+    s.add_argument("--out")
+    s.set_defaults(fn=cmd_sim_assets)
+
+    s = sub.add_parser("migrate", help="레거시 magewell_rpa 변환")
+    s.add_argument("--legacy", required=True)
+    s.add_argument("--out", required=True)
+    s.set_defaults(fn=cmd_migrate)
+
+    s = sub.add_parser("probe", help="장비 확인")
+    s.add_argument("--smoke", action="store_true", help="홈잉·이동·커서 실측까지 (클릭 없음)")
+    s.add_argument("--out", default="probe.png")
+    s.set_defaults(fn=cmd_probe)
+
+    s = sub.add_parser("snap", help="화면 1장 저장")
+    s.add_argument("out")
+    s.set_defaults(fn=cmd_snap)
+
+    s = sub.add_parser("add-target", help="스크린샷 영역을 target 으로 등록")
+    s.add_argument("name")
+    s.add_argument("--image", required=True)
+    s.add_argument("--box", required=True, help="x,y,w,h")
+    s.add_argument("--offset", help="클릭 위치 보정 dx,dy")
+    s.add_argument("--threshold", type=float)
+    s.add_argument("--sim", action="store_true")
+    s.set_defaults(fn=cmd_add_target)
+
+    args = p.parse_args(argv)
+    return args.fn(args)

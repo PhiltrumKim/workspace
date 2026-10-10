@@ -1,0 +1,10 @@
+{
+  "ghost": 1,
+  "name": "ack_alarm",
+  "description": "알람 팝업 확인(OK) 후 사라짐 확인",
+  "steps": [
+    { "action": "wait_for", "target": "alarm_title", "timeout": 3 },
+    { "action": "screenshot", "label": "alarm" },
+    { "action": "click", "target": "alarm_ok", "expect": { "gone": "alarm_title", "timeout": 2 }, "retry": 1 }
+  ]
+}
