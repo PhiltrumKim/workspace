@@ -18,6 +18,7 @@ from ..registry import Registry
 from ..surveillance import SEVERITY, Notifier, Surveillance, WatchEvent, validate_rules
 from ..vision import Match
 from . import model
+from .expr import ExprError, as_items, evaluate, render
 
 MAX_DEPTH = 8
 MAX_HANDLER_RUNS = 5          # 실행 1회당 같은 규칙 핸들러 최대 실행 횟수 (처리 안 되는 알람 무한 반복 방지)
@@ -49,6 +50,26 @@ class StepFailed(Exception):
     pass
 
 
+class LoopBreak(Exception):
+    pass
+
+
+class LoopContinue(Exception):
+    pass
+
+
+def resolve_params(sc: dict, given: Optional[dict] = None) -> dict:
+    """시나리오 params 기본값 + 실행 시 넘긴 값. 기본값도 값도 없는 파라미터가 있으면 ScenarioError."""
+    out = {}
+    for k, spec in (sc.get("params") or {}).items():
+        out[k] = spec.get("default") if isinstance(spec, dict) else spec
+    out.update(given or {})
+    missing = [k for k, v in out.items() if v is None]
+    if missing:
+        raise model.ScenarioError([f"파라미터 값이 필요합니다: {', '.join(missing)}"])
+    return out
+
+
 class WatchAbort(Exception):
     def __init__(self, ev: WatchEvent, reason: str = ""):
         super().__init__(reason or f"감시 규칙 '{ev.rule}' 에 의해 중단")
@@ -76,6 +97,7 @@ class Runner:
         self._name = ""
         self.on_step: Optional[Callable[[StepResult], None]] = None   # 스텝 완료 알림 (편집기 진행 표시용)
         self._last_box: dict = {}                                         # target 별 마지막 발견 위치
+        self.vars: dict = {}                                              # 실행 변수 (파라미터·read·set·반복 변수)
 
     # ------------------------------------------------------------ 감시
     def _set_watch(self, rules: List[dict]) -> None:
@@ -151,12 +173,14 @@ class Runner:
             return self.loc.locate(target, frame)
         except FileNotFoundError as e:
             raise StepFailed(str(e))
+        except KeyError:                          # ${변수} 로 만든 이름이 등록되지 않은 경우 등
+            raise StepFailed(f"등록되지 않은 target '{tdesc(target)}'")
 
     @staticmethod
     def _tkey(target) -> str:
         return target if isinstance(target, str) else json.dumps(target, sort_keys=True, ensure_ascii=False)
 
-    def _clear_cursor(self, target) -> bool:
+    def _clear_cursor(self, target) -> bool:  # noqa: C901
         """커서가 target 의 검색 영역·마지막 발견 위치·등록 위치를 가리고 있으면 바깥으로 치운다.
         (가린 채로 찾으면 OCR·템플릿이 실패하고, '사라짐' 확인은 거짓 성공할 수 있다)"""
         if not self.cfg["cursor"].get("auto_park", True):
@@ -208,7 +232,10 @@ class Runner:
         if "target" not in st:
             return (int(st["x"]), int(st["y"])), f"({st['x']},{st['y']})"
         t = st["target"]
-        rec = self.loc.spec(t)
+        try:
+            rec = self.loc.spec(t)
+        except KeyError:
+            raise StepFailed(f"등록되지 않은 target '{tdesc(t)}'")
         try:
             m = self.wait_for(t, st.get("timeout", 3.0))
         except StepFailed:
@@ -247,6 +274,7 @@ class Runner:
                 raise StepFailed(f"{name}: '{raw}' 에서 패턴 불일치")
             value = mt.group(1) if mt.groups() else mt.group(0)
         res.values[name] = value                 # 범위 검사 실패여도 판독값은 남긴다 (감사 추적)
+        self.vars[name] = value
         self.bb.event("read", name=name, value=value, raw=raw, region=region,
                       hits=[(h.text, h.conf) for h in hits], **extra)
         if region is not None:
@@ -263,14 +291,17 @@ class Runner:
                 + (f" [다수결 일치도 {extra['agree']}]" if extra else ""))
 
     # ------------------------------------------------------------ 실행
-    def run(self, sc: dict) -> RunResult:
+    def run(self, sc: dict, params: Optional[dict] = None) -> RunResult:
         self.stop_event.clear()
         res = RunResult(sc["name"], ok=False)
         self._res, self._name = res, sc["name"]
+        self.vars = resolve_params(sc, params)
         self._set_watch(self.base_watch + list(sc.get("watch") or []))
         res.run_dir = self.bb.start(sc["name"])
-        self.bb.event("scenario", scenario=sc)
+        self.bb.event("scenario", scenario=sc, params=self.vars)
         self.log(f"▶ {sc['name']} — {sc.get('description', '')}")
+        if self.vars:
+            self.log(f"  파라미터: {self.vars}")
         if self.watch:
             self.log(f"  감시 규칙: {', '.join(r['name'] for r in self.watch.rules)}")
         try:
@@ -283,6 +314,9 @@ class Runner:
             self.bb.event("abort", rule=e.ev.rule, reason=str(e))
             self.bb.clip(f"abort_{e.ev.rule}", str(e))
             self._on_abort(sc, res)
+        except (LoopBreak, LoopContinue):          # 검증기가 막지만, 반복 밖 break/continue 는 실패로
+            self.log("✖ 반복문 밖에서 break/continue")
+            res.ok = False
         except Exception as e:                  # 장비 오류 등: 기록하고 안전하게 종료
             self.log(f"✖ 실행 중단: {e!r}")
             self.bb.event("error", error=repr(e))
@@ -342,10 +376,19 @@ class Runner:
                 return False
             self._tick()
             idx = f"{prefix}{i}"
+            t0 = time.monotonic()
+            try:
+                st = render(st, self.vars)                # ${변수} 치환 (중첩 스텝·조건은 실행 시점에)
+            except ExprError as e:
+                st_err = str(e)
+            else:
+                st_err = None
             desc = model.describe(st)
             self.bb.annotate(f"[{idx}] {model.describe({**st, 'label': None})}")   # 영상 표시는 ASCII 라 한글 라벨 제외
-            t0 = time.monotonic()
-            ok, msg = self._attempt(st, res, idx, depth)
+            if st_err is not None:
+                ok, msg = False, st_err
+            else:
+                ok, msg = self._attempt(st, res, idx, depth)
             sr = StepResult(idx, st["action"], desc, ok, msg, round(time.monotonic() - t0, 2))
             res.steps.append(sr)
             if self.on_step is not None:
@@ -368,11 +411,13 @@ class Runner:
                 return False
         return True
 
-    def run_step(self, st: dict, index: str = "편집") -> Tuple[StepResult, dict]:
+    def run_step(self, st: dict, index: str = "편집", variables: Optional[dict] = None) -> Tuple[StepResult, dict]:
         """스텝 하나만 실행 (편집기의 '이 스텝 실행'). 감시·블랙박스 실행 기록 없이 재시도·사후조건은 적용.
-        반환: (결과, read 로 읽은 값)"""
+        variables: ${변수} 치환에 쓸 값 (편집기에서 파라미터 기본값 등). 반환: (결과, read 로 읽은 값)"""
+        self.vars = dict(variables or {})
         desc = model.describe(st)
-        errs = model.validate({"name": "step", "steps": [st]}, self.reg)
+        errs = model.validate({"name": "step", "steps": [st], "params": {k: {"default": v} for k, v in self.vars.items()}},
+                              self.reg)
         if errs:
             return StepResult(index, st.get("action", "?"), desc, False, "; ".join(errs), 0.0), {}
         res = RunResult("step", ok=False)
@@ -380,6 +425,8 @@ class Runner:
         self.stop_event.clear()
         t0 = time.monotonic()
         try:
+            st = render(st, self.vars)
+            desc = model.describe(st)
             ok, msg = self._attempt(st, res, index, 0)
         except Exception as e:
             ok, msg = False, f"오류: {e!r}"
@@ -451,7 +498,104 @@ class Runner:
             if depth >= MAX_DEPTH:
                 raise StepFailed("call 깊이 초과")
             sub = self._load_sub(st["scenario"])
-            if not self._run_steps(sub["steps"], res, prefix=f"{idx}.", depth=depth + 1):
+            try:
+                sub_vars = resolve_params(sub, st.get("args") or {})
+            except model.ScenarioError as e:
+                raise StepFailed(f"하위 '{st['scenario']}': {e}")
+            outer, self.vars = self.vars, sub_vars
+            try:
+                ok = self._run_steps(sub["steps"], res, prefix=f"{idx}.", depth=depth + 1)
+            finally:
+                exported = {k: v for k, v in self.vars.items() if k not in (sub.get("params") or {})}
+                self.vars = outer
+                self.vars.update(exported)          # 하위에서 읽거나 설정한 값은 호출한 쪽으로
+            if not ok:
                 raise StepFailed(f"하위 '{st['scenario']}' 실패")
             return f"하위 '{st['scenario']}' 완료"
+        if a == "set":
+            if "expr" in st:
+                try:
+                    val = evaluate(st["expr"], self.vars)
+                except ExprError as e:
+                    raise StepFailed(str(e))
+            else:
+                val = st.get("value", "")
+            self.vars[st["name"]] = val
+            return f"{st['name']} = {val!r}"
+        if a == "if":
+            branch = "then" if self._cond(st["cond"]) else "else"
+            steps = st.get(branch) or []
+            if steps and not self._run_steps(steps, res, prefix=f"{idx}.{branch}.", depth=depth + 1):
+                raise StepFailed(f"{branch} 블록 실패")
+            return f"조건 {'참' if branch == 'then' else '거짓'} → {branch} ({len(steps)}스텝)"
+        if a in ("repeat", "for_each", "while"):
+            return self._loop(st, res, idx, depth)
+        if a == "break":
+            raise LoopBreak()
+        if a == "continue":
+            raise LoopContinue()
+        if a == "fail":
+            raise StepFailed(str(st.get("message", "시나리오가 실패를 지정함")))
         raise StepFailed(f"알 수 없는 action {a}")
+
+    # ------------------------------------------------------------ 조건·반복
+    def _cond(self, cond: dict) -> bool:
+        try:
+            return self._cond_eval(render(cond, self.vars, skip=()))
+        except ExprError as e:
+            raise StepFailed(f"조건 오류: {e}")
+
+    def _cond_eval(self, c: dict) -> bool:
+        if "all" in c:
+            return all(self._cond_eval(x) for x in c["all"])
+        if "any" in c:
+            return any(self._cond_eval(x) for x in c["any"])
+        if "not" in c:
+            return not self._cond_eval(c["not"])
+        if "expr" in c:
+            return bool(evaluate(c["expr"], self.vars))
+        gone = "gone" in c
+        try:
+            self.wait_for(c["gone"] if gone else c["visible"], float(c.get("timeout", 0)), gone=gone)
+            return True
+        except StepFailed:
+            return False
+
+    def _loop(self, st: dict, res: RunResult, idx: str, depth: int) -> str:
+        a, body = st["action"], st.get("steps") or []
+        if a == "repeat":
+            items, var = list(range(1, int(st["times"]) + 1)), st.get("var", "i")
+        elif a == "for_each":
+            try:
+                items = as_items(st["items"])
+            except ExprError as e:
+                raise StepFailed(str(e))
+            var = st.get("var", "item")
+        else:
+            items, var = None, st.get("var", "i")
+        limit = int(st.get("max", 100))
+        n = 0
+        while True:
+            if items is not None:
+                if n >= len(items):
+                    break
+                self.vars[var] = items[n]
+                if a == "for_each":
+                    self.vars[f"{var}_index"] = n + 1
+            else:
+                if not self._cond(st["cond"]):
+                    break
+                if n >= limit:
+                    raise StepFailed(f"while 반복이 상한 {limit}회를 넘음")
+                self.vars[var] = n + 1
+            n += 1
+            if self.stop_event.is_set():
+                raise StepFailed("중지됨")
+            try:
+                if not self._run_steps(body, res, prefix=f"{idx}[{n}].", depth=depth + 1):
+                    raise StepFailed(f"{n}회차 실패")
+            except LoopContinue:
+                continue
+            except LoopBreak:
+                return f"{n}회차에서 break"
+        return f"{n}회 반복"

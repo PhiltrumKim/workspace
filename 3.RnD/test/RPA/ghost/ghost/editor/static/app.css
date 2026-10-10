@@ -36,7 +36,9 @@ button.danger { color: var(--bad); }
 button.ghost { border-color: transparent; background: transparent; color: var(--muted); }
 input, select, textarea { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--panel); min-width: 0; }
 label { display: grid; gap: 3px; font-size: 12.5px; color: var(--muted); }
-label > input, label > select { color: var(--ink); font-size: 14px; }
+label > input, label > select, label > textarea { color: var(--ink); font-size: 14px; width: 100%; min-width: 0; }
+.card > *, .fld > *, .field-grid > * { min-width: 0; }   /* 그리드 안 입력칸이 패널 밖으로 넘치지 않도록 */
+.fld .inline select { flex: 1; min-width: 0; }
 .mono { font-family: var(--mono); }
 .hint { color: var(--muted); font-size: 12.5px; margin: 0; }
 
@@ -100,6 +102,22 @@ label > input, label > select { color: var(--ink); font-size: 14px; }
 .step.passed { border-left: 3px solid var(--go); }
 .step.failed { border-left: 3px solid var(--bad); }
 button.add { border-style: dashed; color: var(--accent); }
+button.add.small { padding: 2px 8px; font-size: 12.5px; justify-self: start; }
+.substeps { margin: 6px 0 2px 0; padding: 6px 0 2px 10px; border-left: 2px solid var(--line); display: grid; gap: 6px; }
+.substeps > .blk { font-size: 12px; color: var(--muted); font-weight: 700; }
+.step.container { grid-template-columns: 26px minmax(0, 1fr) auto; align-items: start; }
+.step.container > .body { grid-column: 2 / 4; }
+.step.container > .tools { grid-column: 3; grid-row: 1; }
+.step .n.nested { font-size: 11px; }
+.params summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.params[open] { display: grid; gap: 6px; }
+.ptable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ptable th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 2px 4px; }
+.ptable td { padding: 2px 4px; }
+.ptable input { width: 100%; }
+.vars-hint { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.vars-hint .mono { background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 0 4px; margin-right: 3px; cursor: pointer; }
+.run-form { border-color: var(--go); }
 
 .fld { display: grid; gap: 4px; }
 .fld .inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }

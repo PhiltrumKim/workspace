@@ -242,15 +242,16 @@ class EditorApp:
         if not self.lock.acquire(blocking=False):
             raise ApiError(409, "다른 동작이 실행 중입니다")
 
-    def run_step(self, st: dict) -> dict:
+    def run_step(self, st: dict, variables: Optional[dict] = None) -> dict:
         self._acquire()
         try:
-            sr, values = self.runner.run_step(st)
+            sr, values = self.runner.run_step(st, variables=variables)
         finally:
             self.lock.release()
         return {**sr.__dict__, "values": values, "cursor": list(self.dev.pos)}
 
-    def start_run(self, sc: dict) -> dict:
+    def start_run(self, sc: dict, params: Optional[dict] = None) -> dict:
+        from ..scenario.runner import resolve_params
         sc = {"ghost": 1, "name": "editor_run", **sc}
         if isinstance(sc.get("watch"), str):
             from ..surveillance import load_rules
@@ -258,13 +259,17 @@ class EditorApp:
         errs = model.validate(sc, self.reg)
         if errs:
             raise ApiError(400, "; ".join(errs))
+        try:
+            resolve_params(sc, params)
+        except model.ScenarioError as e:
+            raise ApiError(400, str(e))
         self._acquire()
         self.run = {"running": True, "name": sc["name"], "steps": [], "ok": None, "run_dir": "",
                     "values": {}, "started": time.time(), "total": len(sc["steps"])}
 
         def work():
             try:
-                res = self.runner.run(sc)
+                res = self.runner.run(sc, params)
                 self.run.update(ok=res.ok, run_dir=os.path.basename(res.run_dir), values=res.values,
                                 stopped=res.stopped, aborted_by=res.aborted_by)
             except Exception as e:
@@ -402,6 +407,8 @@ def make_handler(app: EditorApp):
                 return self._api(method, parts[1:], q)
             except ApiError as e:
                 self._json({"error": str(e)}, e.status)
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                pass                                    # 브라우저가 응답 도중 연결을 끊음 (페이지 닫힘·새로고침)
             except Exception as e:                      # 예상 못한 오류도 JSON 으로
                 app.log(f"[편집기] API 오류 {self.path}: {e!r}")
                 self._json({"error": f"서버 오류: {e!r}"}, 500)
@@ -439,9 +446,11 @@ def make_handler(app: EditorApp):
             if key == ("POST", "validate"):
                 return self._json({"errors": a.validate(self._body())})
             if key == ("POST", "step"):
-                return self._json(a.run_step(self._body()))
+                b = self._body()                         # {"step": .., "vars": ..} 또는 스텝 자체
+                return self._json(a.run_step(b["step"], b.get("vars")) if "step" in b else a.run_step(b))
             if key == ("POST", "run") and len(p) == 1:
-                return self._json(a.start_run(self._body()))
+                b = self._body()                         # {"scenario": .., "params": ..} 또는 시나리오 자체
+                return self._json(a.start_run(b["scenario"], b.get("params")) if "scenario" in b else a.start_run(b))
             if key == ("GET", "run"):
                 return self._json(a.run)
             if key == ("POST", "run") and p[1:] == ["stop"]:

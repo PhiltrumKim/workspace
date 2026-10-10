@@ -114,3 +114,53 @@ def test_full_authoring_flow(page_and_app):
     page.wait_for_selector("#run-detail .detail-steps div")
 
     assert errors == [], errors
+
+
+def test_nested_flow_and_params(page_and_app):
+    """중첩 스텝 트리 표시, 실행 값 입력, 조건 분기 안에 스텝 추가·저장."""
+    page, app, w, errors, tmp = page_and_app
+
+    # 1) 반복·조건이 있는 시나리오 → 트리로 표시
+    page.select_option("#scen-select", "demo_lots")
+    page.wait_for_selector("#steps .substeps")
+    assert page.locator("#steps > li.step").count() == 6
+    assert page.locator("#steps .substeps li.step").count() >= 10
+    assert page.input_value("#params-rows tr:nth-child(1) input") == "lots"
+
+    # 2) 실행 → 값 입력 창에서 LOT 목록 변경 → 성공, 반복 안 스텝 결과 표시
+    page.click("#scen-run")
+    page.wait_for_selector("#run-form:not([hidden])")
+    page.fill("#run-p-lots", "LOT-Q1")
+    page.click("#run-form button[type=submit]")
+    page.wait_for_function("document.querySelector('#scen-msg').textContent.includes('성공')", timeout=60000)
+    assert [e for e in w.app.events if e.startswith("DONE")] == ["DONE rcp_b lot=LOT-Q1"]
+    assert page.locator("#steps .substeps li.step.passed").count() >= 5
+
+    # 3) 새 시나리오: 조건 분기(계산식) + 그러면 안에 스텝
+    page.click("#scen-new")
+    page.fill("#scen-name", "e2e_nested")
+    page.click("#params-box summary")                     # 파라미터 영역 펼치기 (없으면 접혀 있음)
+    page.click("#param-add")
+    page.fill("#params-rows tr:nth-child(1) input[aria-label=name]", "n")
+    page.fill("#params-rows tr:nth-child(1) input[aria-label=default]", "5")
+    page.click("#step-add")
+    page.select_option("#sf-action", "if")
+    page.select_option("#f-cond-kind", "expr")
+    page.fill("#f-cond-expr", "n > 3")
+    page.click("#sf-save")
+    page.wait_for_selector("#steps .substeps button.add")
+    page.locator("#steps .substeps").nth(0).locator("button.add").click()   # '그러면' 안에 추가
+    page.wait_for_function("document.querySelector('#step-form-title').textContent.includes('그러면')")
+    page.select_option("#sf-action", "set")
+    page.fill("#f-set-name", "big")
+    page.fill("#f-set-val", "yes ${n}")
+    page.click("#sf-save")
+    page.wait_for_function("document.querySelectorAll('#steps .substeps li.step').length === 1")
+    page.click("#scen-save")
+    page.wait_for_function("document.querySelector('#scen-msg').textContent.includes('저장했습니다')")
+    with open(os.path.join(app.scen_dir, "e2e_nested.json"), encoding="utf-8") as f:
+        saved = json.load(f)
+    assert saved["params"] == {"n": {"default": "5"}}
+    assert saved["steps"][0]["cond"] == {"expr": "n > 3"}
+    assert saved["steps"][0]["then"] == [{"action": "set", "name": "big", "value": "yes ${n}"}]
+    assert errors == [], errors

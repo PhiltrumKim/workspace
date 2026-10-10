@@ -59,6 +59,46 @@ python -m ghost run scenarios/my_job.json
 설정은 `ghost.json` (COM 포트, 카메라 번호, 해상도, 경로). 기본값은 `ghost/config.py`.
 `--sim` 실행 시에는 `ghost.json` 의 `"sim"` 섹션이 덧씌워진다.
 
+## 변수·조건·반복
+
+실제 분석 레시피를 표현하기 위한 흐름 제어다. 형식 전체는 `ghost/scenario/model.py` 머리말에 있다.
+
+```json
+{"params": {"lots": {"default": "LOT-A,LOT-B", "description": "처리할 LOT"}},
+ "steps": [
+   {"action": "for_each", "items": "${lots}", "var": "lot", "steps": [
+     {"action": "type", "text": "${lot}"},
+     {"action": "read", "name": "lot_read", "region": [502, 182, 412, 72]},
+     {"action": "if", "cond": {"expr": "lot_read != lot"},
+      "then": [{"action": "fail", "message": "LOT 불일치 ${lot_read}"}]}]}]}
+```
+
+| 기능 | 내용 |
+|---|---|
+| 파라미터 | `params` 기본값. 실행 시 `--param lots=A,B` 또는 편집기 실행 창에서 바꾼다. |
+| 변수 | 문자열 어디서나 `${이름}`. `read` 값, `set` 값, 반복 변수도 변수다. |
+| set | 값 그대로(`value`) 또는 계산식(`expr`) |
+| if | 조건: 대상이 보임 / 없음 / 계산식, 그리고 `all`·`any`·`not` 조합. `then`·`else` |
+| repeat · for_each · while | N번 / 목록 항목마다(`이름_index` 도 제공) / 조건 동안(상한 `max`, 기본 100) |
+| break · continue · fail | 반복 탈출 / 다음 회차 / 지정 메시지로 실패 |
+| call 인자 | `args` 로 하위 시나리오 파라미터를 넘긴다. 하위에서 읽거나 설정한 값은 돌려받는다. |
+
+- **계산식**은 `eval` 을 쓰지 않는다. 구문 트리 화이트리스트로 사칙·비교·논리와 허용 함수(`len`, `int`, `round` 등)만 평가한다. 숫자처럼 보이는 판독값('09.91')은 계산식 안에서 숫자로 비교된다.
+- **검증기**는 중첩 스텝까지 검사한다. 다음을 저장 전에 알려 준다: 정의되지 않은 변수, 반복 밖 `break`, 금지된 계산식, 빈 반복.
+- **실행 기록**의 스텝 번호에 반복 회차가 남는다 (`2[3].6` = 2번 반복의 3회차 6번째 스텝).
+- **편집기**:
+  - 스텝을 트리로 보여 준다. 그러면/아니면, 반복 안에 스텝을 추가·이동·복제할 수 있다.
+  - 동작은 분류별 목록에서 고른다.
+  - 사용 가능한 변수 목록이 표시되고, 누르면 입력칸에 넣는다.
+  - 파라미터 표가 있고, 실행 직전에 값을 입력하는 창이 뜬다.
+
+실장비 예제: `scenarios/xnote_laps.json`
+- 스톱워치가 꺼져 있을 때만 실행한다 (`if gone`).
+- `${count}` 번 측정하고, 판독값이 대기 시간보다 짧으면 실패 처리한다.
+- 합계·평균을 계산한다 (`--param count=3 --param measure_sec=1.5`: 6.63 / 5.94 / 6.93 s, 평균 6.5 s).
+
+시뮬레이터 예제: `scenarios/sim/demo_lots.json` (LOT 목록 일괄 처리, 입력값 재확인, 처리 건수 확인).
+
 ## 시나리오 편집기
 
 코드를 몰라도 화면을 보며 시나리오를 만드는 로컬 웹 도구다.

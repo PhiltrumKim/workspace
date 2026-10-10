@@ -1,0 +1,39 @@
+{
+  "ghost": 1,
+  "name": "xnote_laps",
+  "description": "반복 측정 (XNote Stopwatch): 정해진 횟수만큼 시작→대기→정지→판독→리셋, 판독값 검사·합계 (반복·조건·파라미터 실장비 예제)",
+  "params": {
+    "count": { "default": 2, "description": "측정 횟수" },
+    "measure_sec": { "default": 2, "description": "1회 측정 대기 시간(초)" }
+  },
+  "watch": "watch_xnote.json",
+  "on_abort": "xn_safe_close",
+  "steps": [
+    { "action": "if", "cond": { "gone": "xn_display" }, "label": "스톱워치가 꺼져 있으면 실행",
+      "then": [
+        { "action": "hotkey", "keys": ["win", "r"], "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+        { "action": "type", "text": "%USERPROFILE%\\Desktop\\XNote Stopwatch\\xnsw.exe" },
+        { "action": "key", "key": "enter", "expect": { "visible": "xn_display", "timeout": 10 } },
+        { "action": "wait_gone", "target": "xn_nag_title", "timeout": 8 }
+      ] },
+    { "action": "set", "name": "total", "value": 0 },
+    { "action": "repeat", "times": "${count}", "var": "lap", "label": "측정 반복",
+      "steps": [
+        { "action": "right_click", "target": "xn_display", "expect": { "visible": "menu_start", "timeout": 3 }, "retry": 1 },
+        { "action": "click", "target": "menu_start", "label": "시작", "expect": { "gone": "menu_start", "timeout": 3 } },
+        { "action": "wait", "sec": "${measure_sec}" },
+        { "action": "right_click", "target": "xn_display", "expect": { "visible": "menu_stop", "timeout": 3 }, "retry": 1 },
+        { "action": "click", "target": "menu_stop", "label": "정지", "expect": { "gone": "menu_stop", "timeout": 3 } },
+        { "action": "move", "x": 1300, "y": 600 },
+        { "action": "read", "name": "lap_s", "region": [1140, 20, 770, 240], "vote": true,
+          "pattern": "^00:00:(\\d\\d\\.\\d\\d)$", "label": "측정값 판독" },
+        { "action": "if", "cond": { "expr": "lap_s < measure_sec" },
+          "then": [ { "action": "fail", "message": "${lap}회차 측정값 ${lap_s}s 가 대기 시간 ${measure_sec}s 보다 짧음" } ] },
+        { "action": "set", "name": "total", "expr": "total + lap_s" },
+        { "action": "right_click", "target": "xn_display", "expect": { "visible": "menu_reset", "timeout": 3 }, "retry": 1 },
+        { "action": "click", "target": "menu_reset", "label": "리셋", "expect": { "gone": "menu_reset", "timeout": 3 } }
+      ] },
+    { "action": "set", "name": "avg", "expr": "round(total / count, 2)" },
+    { "action": "call", "scenario": "xn_safe_close", "label": "종료" }
+  ]
+}

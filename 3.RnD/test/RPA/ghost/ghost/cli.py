@@ -54,9 +54,20 @@ def cmd_run(args) -> int:
         runner.base_watch = load_rules(os.path.abspath(args.watch))
     if args.sim and args.sim_alarm is not None:
         dev.video.world.app.schedule_alarm(args.sim_alarm, "PRESSURE LOW")
+    params = {}
+    for kv in args.param or []:
+        if "=" not in kv:
+            _log(f"  ✗ --param 형식은 이름=값: {kv}")
+            return 2
+        k, v = kv.split("=", 1)
+        params[k.strip()] = v
     dev.open(home=not args.no_home)
     try:
-        res = runner.run(sc)
+        res = runner.run(sc, params)
+    except model.ScenarioError as e:
+        for err in e.errors:
+            _log(f"  ✗ {err}")
+        return 2
     except KeyboardInterrupt:
         runner.stop_event.set()
         return 130
@@ -316,6 +327,7 @@ def main(argv=None) -> int:
     s.add_argument("--sim", action="store_true", help="시뮬레이터로 실행")
     s.add_argument("--no-home", action="store_true", help="시작 시 홈잉 생략")
     s.add_argument("--watch", help="추가 감시 규칙 파일")
+    s.add_argument("--param", action="append", help="시나리오 파라미터 이름=값 (여러 번 지정 가능)")
     s.add_argument("--sim-alarm", type=float, help="(시뮬레이터) N초 뒤 알람 팝업 발생")
     s.set_defaults(fn=cmd_run)
 

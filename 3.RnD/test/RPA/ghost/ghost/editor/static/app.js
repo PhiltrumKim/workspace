@@ -30,7 +30,8 @@ const S = {
   scen: { name: "", description: "", steps: [] }, extra: {},   // extra: watch, on_abort 등 폼 밖의 키
   live: true, mode: "view", img: new Image(), imgW: 1920, imgH: 1080,
   overlay: [], drag: null, pick: null, logSeq: 0,
-  editIndex: null, stepResults: {}, runPoll: null, dirty: false,
+  editPath: null, stepResults: {}, runPoll: null, dirty: false, runningIdx: null,
+  paramRows: [],                                              // [{name, default, description}]
 };
 
 // ---------------------------------------------------------------- 동작 정의 (스텝 폼)
@@ -48,12 +49,43 @@ const ACTIONS = {
   expect:      { label: "화면 확인", fields: ["target_only", "timeout", "label"] },
   read:        { label: "글자·수치 읽기", fields: ["name", "region", "pattern", "range", "vote", "label"] },
   screenshot:  { label: "화면 저장", fields: ["label"] },
-  call:        { label: "다른 시나리오 실행", fields: ["scenario", "label"] },
+  call:        { label: "다른 시나리오 실행", fields: ["scenario", "args", "label"] },
   home:        { label: "커서 원점 재설정", fields: ["label"] },
+  set:         { label: "변수 설정", fields: ["setv", "label"] },
+  if:          { label: "조건 분기 (만약)", fields: ["cond", "label"] },
+  repeat:      { label: "N번 반복", fields: ["times", "var", "label"] },
+  for_each:    { label: "목록 항목마다 반복", fields: ["items", "var", "label"] },
+  while:       { label: "조건이 맞는 동안 반복", fields: ["cond", "max", "var", "label"] },
+  break:       { label: "반복 빠져나가기", fields: ["label"] },
+  continue:    { label: "다음 회차로 건너뛰기", fields: ["label"] },
+  fail:        { label: "실패로 처리", fields: ["message", "label"] },
 };
+const ACTION_GROUPS = [
+  ["조작", ["click", "double", "right_click", "move", "type", "key", "hotkey"]],
+  ["대기·확인", ["wait", "wait_for", "wait_gone", "expect"]],
+  ["읽기·기록", ["read", "screenshot"]],
+  ["흐름 제어", ["if", "for_each", "repeat", "while", "set", "break", "continue", "fail", "call"]],
+  ["기타", ["home"]],
+];
+const CHILD_KEYS = {
+  if: [["then", "그러면 (조건이 맞을 때)"], ["else", "아니면 (조건이 안 맞을 때)"]],
+  repeat: [["steps", "반복할 스텝"]], for_each: [["steps", "항목마다 실행할 스텝"]], while: [["steps", "조건이 맞는 동안 실행할 스텝"]],
+};
+const VAR_DEFAULT = { repeat: "i", while: "i", for_each: "item" };
 const POINTER = ["click", "double", "right_click", "move"];
 
 function tname(t) { return typeof t === "string" ? t : t && t.text !== undefined ? `"${t.text}"` : "?"; }
+
+function condText(c) {
+  if (!c || typeof c !== "object") return "?";
+  if ("expr" in c) return c.expr;
+  if ("visible" in c) return `${tname(c.visible)} 보이면${c.timeout ? ` (${c.timeout}초까지)` : ""}`;
+  if ("gone" in c) return `${tname(c.gone)} 없으면`;
+  if ("not" in c) return `아님(${condText(c.not)})`;
+  if ("all" in c) return c.all.map(condText).join(" 그리고 ");
+  if ("any" in c) return c.any.map(condText).join(" 또는 ");
+  return "?";
+}
 
 function summary(st) {
   const a = st.action;
@@ -65,7 +97,13 @@ function summary(st) {
   if (a === "hotkey") bits.push((st.keys || []).join("+"));
   if (a === "wait") bits.push(`${st.sec}초`);
   if (a === "read") bits.push(`${st.name || "value"} ← ${st.region ? "[" + st.region.join(",") + "]" : st.anchor ? tname(st.anchor) + " 기준" : ""}${st.vote ? " · 다수결" : ""}`);
-  if (a === "call") bits.push(st.scenario);
+  if (a === "call") bits.push(st.scenario + (st.args && Object.keys(st.args).length ? ` (${Object.entries(st.args).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""));
+  if (a === "set") bits.push(`${st.name} = ${st.expr !== undefined ? st.expr : JSON.stringify(st.value)}`);
+  if (a === "if" || a === "while") bits.push(condText(st.cond));
+  if (a === "repeat") bits.push(`${st.times}번 (변수 ${st.var || "i"})`);
+  if (a === "for_each") bits.push(`${st.var || "item"} ← ${Array.isArray(st.items) ? st.items.join(", ") : st.items}`);
+  if (a === "while" && st.max) bits.push(`최대 ${st.max}회`);
+  if (a === "fail" && st.message) bits.push(st.message);
   if (st.timeout !== undefined && a !== "wait") bits.push(`최대 ${st.timeout}초`);
   if (st.expect) bits.push(`확인: ${tname(st.expect.visible ?? st.expect.gone)} ${"gone" in st.expect ? "사라짐" : "표시"}`);
   if (st.retry) bits.push(`재시도 ${st.retry}`);
@@ -358,6 +396,33 @@ $("#tf-test").addEventListener("click", async () => {
 $("#target-filter").addEventListener("input", renderTargets);
 
 // ---------------------------------------------------------------- 시나리오
+// 스텝 위치 = 목록 경로 lp ([[부모번호, "then"|"else"|"steps"], ...], 최상위 = []) + 목록 안 번호 i
+function listAt(lp, root = S.scen.steps) {
+  let arr = root;
+  for (const [i, k] of lp) { const st = arr[i]; if (!Array.isArray(st[k])) st[k] = []; arr = st[k]; }
+  return arr;
+}
+// 실행기 스텝 번호 ("3", "3.then.0", "4[*].1") — 결과 표시용
+function runIndex(lp, i) {
+  let base = "";
+  for (const [pi, k] of lp) base = k === "steps" ? `${base}${pi}[*].` : `${base}${pi}.${k}.`;
+  return base + i;
+}
+// 검증기 스텝 경로 ("3", "3.then.0", "4.1")
+function validIndex(lp, i) {
+  let base = "";
+  for (const [pi, k] of lp) base += k === "steps" ? `${pi}.` : `${pi}.${k}.`;
+  return base + i;
+}
+function resultFor(ri) {
+  if (!ri.includes("*")) return S.stepResults[ri];
+  const re = new RegExp("^" + ri.replace(/[.]/g, "\\.").replace(/\[\*\]/g, "\\[\\d+\\]") + "$");
+  let last;
+  for (const [k, v] of Object.entries(S.stepResults)) if (re.test(k)) last = v;   // 마지막 회차
+  return last;
+}
+const samePath = (a, lp, i) => a && a.i === i && JSON.stringify(a.lp) === JSON.stringify(lp);
+
 async function loadScenarioList(select) {
   S.scenarios = (await api("GET", "/api/scenarios")).filter((s) => s.kind === "scenario");
   const sel = $("#scen-select"); sel.replaceChildren(h("option", { value: "" }, "— 시나리오 선택 —"));
@@ -366,61 +431,134 @@ async function loadScenarioList(select) {
 }
 
 function setScenario(sc) {
-  const { name = "", description = "", steps = [], ghost, ...extra } = sc;
-  S.scen = { name, description, steps: steps.map((s) => ({ ...s })) };
-  S.extra = extra; S.stepResults = {}; S.editIndex = null; S.dirty = false;
+  const { name = "", description = "", steps = [], params = {}, ghost, ...extra } = sc;
+  S.scen = { name, description, steps: JSON.parse(JSON.stringify(steps)) };
+  S.paramRows = Object.entries(params || {}).map(([k, v]) => ({
+    name: k, default: v && typeof v === "object" ? (v.default ?? "") : (v ?? ""), description: v && typeof v === "object" ? (v.description ?? "") : "" }));
+  S.extra = extra; S.stepResults = {}; S.editPath = null; S.dirty = false;
   $("#scen-name").value = name; $("#scen-desc").value = description;
-  $("#step-form").hidden = true;
+  $("#step-form").hidden = true; $("#run-form").hidden = true;
+  $("#params-box").open = S.paramRows.length > 0;
   msg($("#scen-msg"), Object.keys(extra).length ? `이 시나리오에는 폼에 없는 설정(${Object.keys(extra).join(", ")})이 있습니다. JSON 보기에서 확인할 수 있고 저장 시 유지됩니다.` : "");
-  renderSteps(); syncJson();
+  renderParams(); renderSteps(); syncJson();
 }
 
+function paramsObject() {
+  const out = {};
+  for (const r of S.paramRows) if (r.name.trim()) out[r.name.trim()] = { default: r.default, ...(r.description ? { description: r.description } : {}) };
+  return out;
+}
+function paramDefaults() {
+  const out = {};
+  for (const r of S.paramRows) if (r.name.trim() && r.default !== "") out[r.name.trim()] = r.default;
+  return out;
+}
 function currentScenario() {
-  return { ...S.extra, name: $("#scen-name").value.trim(), description: $("#scen-desc").value.trim(), steps: S.scen.steps };
+  const sc = { ...S.extra, name: $("#scen-name").value.trim(), description: $("#scen-desc").value.trim() };
+  const p = paramsObject();
+  if (Object.keys(p).length) sc.params = p;
+  sc.steps = S.scen.steps;
+  return sc;
 }
 function markDirty() { S.dirty = true; syncJson(); }
-
 function syncJson() {
   if (!$("#scen-json").hidden) $("#scen-json").value = JSON.stringify({ ghost: 1, ...currentScenario() }, null, 2);
 }
 
-function renderSteps(running = null) {
-  const ol = $("#steps"); ol.replaceChildren();
-  S.scen.steps.forEach((st, i) => {
-    const r = S.stepResults[i];
-    const cls = ["step", S.editIndex === i && "editing", running === i && "running", r && (r.ok ? "passed" : "failed")].filter(Boolean).join(" ");
-    ol.append(h("li", { class: cls },
-      h("span", { class: "n" }, i),
-      h("div", { class: "body" },
-        h("div", { class: "act" }, ACTIONS[st.action]?.label || st.action, st.label ? h("span", { class: "sum" }, `  ${st.label}`) : null),
-        h("div", { class: "sum" }, summary(st)),
-        r ? h("div", { class: `res ${r.ok ? "ok" : "bad"}` }, `${r.ok ? "✓" : "✗"} ${r.message} (${r.elapsed}s)`) : null),
-      h("div", { class: "tools" },
-        h("button", { class: "go", title: "이 스텝만 실행", onclick: () => tryStep(st, i) }, "▶"),
-        h("button", { title: "편집", onclick: () => editStep(i) }, "✎"),
-        h("button", { title: "위로", disabled: i === 0, onclick: () => moveStep(i, -1) }, "↑"),
-        h("button", { title: "아래로", disabled: i === S.scen.steps.length - 1, onclick: () => moveStep(i, 1) }, "↓"),
-        h("button", { class: "ghost", title: "삭제", onclick: () => { S.scen.steps.splice(i, 1); S.stepResults = {}; renderSteps(); markDirty(); } }, "✕"))));
+// ---- 파라미터 표
+function renderParams() {
+  const tb = $("#params-rows"); tb.replaceChildren();
+  S.paramRows.forEach((r, i) => {
+    const inp = (key, ph) => h("input", { value: r[key] ?? "", placeholder: ph, "aria-label": key,
+      oninput: (e) => { r[key] = e.target.value; markDirty(); renderVarsHint(); } });
+    tb.append(h("tr", {}, h("td", {}, inp("name", "lots")), h("td", {}, inp("default", "LOT-A,LOT-B")),
+      h("td", {}, inp("description", "설명")),
+      h("td", {}, h("button", { class: "ghost", title: "삭제", onclick: () => { S.paramRows.splice(i, 1); renderParams(); markDirty(); } }, "✕"))));
   });
+  $("#params-count").textContent = S.paramRows.length ? `(${S.paramRows.length})` : "";
+}
+$("#param-add").addEventListener("click", () => { S.paramRows.push({ name: "", default: "", description: "" }); renderParams(); $("#params-rows tr:last-child input").focus(); });
+
+// ---- 스텝 목록 (트리)
+function renderSteps() {
+  const ol = $("#steps"); ol.replaceChildren();
+  renderList(S.scen.steps, [], ol);
   if (!S.scen.steps.length) ol.append(h("li", { class: "hint" }, "스텝이 없습니다. 아래 '+ 스텝 추가'로 시작하세요."));
 }
+function renderList(arr, lp, ol) { arr.forEach((st, i) => ol.append(renderStep(st, lp, i))); }
 
-function moveStep(i, d) {
-  const s = S.scen.steps; [s[i], s[i + d]] = [s[i + d], s[i]];
+function renderStep(st, lp, i) {
+  const ri = runIndex(lp, i), r = resultFor(ri), kids = CHILD_KEYS[st.action];
+  const arr = listAt(lp);
+  const cls = ["step", kids && "container", samePath(S.editPath, lp, i) && "editing", S.runningIdx === ri && "running",
+               r && (r.ok ? "passed" : "failed")].filter(Boolean).join(" ");
+  const body = h("div", { class: "body" },
+    h("div", { class: "act" }, ACTIONS[st.action]?.label || st.action, st.label ? h("span", { class: "sum" }, `  ${st.label}`) : null),
+    h("div", { class: "sum" }, summary(st)),
+    r ? h("div", { class: `res ${r.ok ? "ok" : "bad"}` }, `${r.ok ? "✓" : "✗"} ${r.message} (${r.elapsed}s)`) : null);
+  if (kids) {
+    for (const [k, label] of kids) {
+      const childLp = [...lp, [i, k]];
+      const sub = h("div", { class: "substeps" }, h("div", { class: "blk" }, label));
+      const ol = h("ol", { class: "steps" });
+      renderList(st[k] || [], childLp, ol);
+      sub.append(ol, h("button", { class: "add small", onclick: () => openStepForm(null, childLp, null) }, "+ 여기에 스텝 추가"));
+      body.append(sub);
+    }
+  }
+  return h("li", { class: cls },
+    h("span", { class: `n ${lp.length ? "nested" : ""}` }, i),
+    body,
+    h("div", { class: "tools" },
+      h("button", { class: "go", title: "이 스텝만 실행", onclick: () => tryStep(st, lp, i) }, "▶"),
+      h("button", { title: "편집", onclick: () => openStepForm(st, lp, i) }, "✎"),
+      h("button", { title: "복제", onclick: () => { arr.splice(i + 1, 0, JSON.parse(JSON.stringify(st))); S.stepResults = {}; renderSteps(); markDirty(); } }, "⧉"),
+      h("button", { title: "위로", disabled: i === 0, onclick: () => moveStep(lp, i, -1) }, "↑"),
+      h("button", { title: "아래로", disabled: i === arr.length - 1, onclick: () => moveStep(lp, i, 1) }, "↓"),
+      h("button", { class: "ghost", title: "삭제", onclick: () => { arr.splice(i, 1); S.stepResults = {}; renderSteps(); markDirty(); } }, "✕")));
+}
+
+function moveStep(lp, i, d) {
+  const s = listAt(lp); [s[i], s[i + d]] = [s[i + d], s[i]];
   S.stepResults = {}; renderSteps(); markDirty();
 }
 
-async function tryStep(st, i = null) {
+async function tryStep(st, lp = null, i = null) {
+  const ri = lp ? runIndex(lp, i) : null;
   try {
-    if (i !== null) renderSteps(i);
-    const r = await api("POST", "/api/step", st);
-    if (i !== null) S.stepResults[i] = r;
+    if (ri) { S.runningIdx = ri; renderSteps(); }
+    const r = await api("POST", "/api/step", { step: st, vars: paramDefaults() });
+    if (ri) S.stepResults[ri.replace(/\[\*\]/g, "[1]")] = r;
     if (S.state) S.state.cursor = r.cursor;
-    renderSteps();
+    S.runningIdx = null; renderSteps();
     if (Object.keys(r.values || {}).length) log(`읽은 값: ${JSON.stringify(r.values)}`);
     return r;
-  } catch (err) { log(`스텝 실행 실패: ${err.message}`); renderSteps(); return null; }
+  } catch (err) { log(`스텝 실행 실패: ${err.message}`); S.runningIdx = null; renderSteps(); return null; }
 }
+
+// ---- 사용 가능한 변수
+function definedVars() {
+  const out = new Set(S.paramRows.map((r) => r.name.trim()).filter(Boolean));
+  const walk = (steps) => (steps || []).forEach((st) => {
+    if (st.action === "read") out.add(st.name || "value");
+    if (st.action === "set" && st.name) out.add(st.name);
+    if (st.action === "repeat" || st.action === "while") out.add(st.var || "i");
+    if (st.action === "for_each") { const v = st.var || "item"; out.add(v); out.add(`${v}_index`); }
+    for (const k of ["steps", "then", "else"]) walk(st[k]);
+  });
+  walk(S.scen.steps);
+  return [...out];
+}
+let lastTextInput = null;
+function renderVarsHint() {
+  const el = $("#sf-vars"); if (!el) return;
+  const vars = definedVars();
+  el.replaceChildren(...(vars.length ? ["사용 가능한 변수 (눌러서 넣기): ", ...vars.map((v) => h("span", { class: "mono", title: "커서 위치에 넣기",
+    onclick: () => { if (lastTextInput) { const t = lastTextInput; const pos = t.selectionStart ?? t.value.length;
+      t.value = t.value.slice(0, pos) + "${" + v + "}" + t.value.slice(pos); t.focus(); } } }, "${" + v + "}"))]
+    : ["파라미터나 읽기·변수 설정 스텝을 만들면 ${이름} 으로 쓸 수 있습니다."]));
+}
+document.addEventListener("focusin", (e) => { if (e.target.matches?.("#sf-fields input[type=text], #sf-fields input:not([type]), #sf-fields textarea")) lastTextInput = e.target; });
 
 // ---------------------------------------------------------------- 스텝 폼
 const sf = { action: "click", step: {} };
@@ -430,10 +568,12 @@ function targetOptions(sel, allowXY) {
   if (allowXY) opts.push(h("option", { value: "@xy" }, "(화면 좌표 직접 지정)"));
   for (const t of S.targets) opts.push(h("option", { value: t.name }, `${t.name} · ${t.kind === "text" ? "글자" : "그림"}`));
   if (typeof sel === "object" && sel !== null) opts.push(h("option", { value: "@inline" }, `글자 ${tname(sel)} (인라인)`));
+  if (typeof sel === "string" && sel.includes("${")) opts.push(h("option", { value: sel }, `${sel} (변수)`));
   return opts;
 }
 
 function numInput(id, val, attrs = {}) { return h("input", { id, type: "number", value: val ?? "", ...attrs }); }
+function textInput(id, val, attrs = {}) { return h("input", { id, type: "text", value: val ?? "", ...attrs }); }
 
 function fieldTarget(st, allowXY) {
   const cur = st.target === undefined ? (st.x !== undefined ? "@xy" : "") : typeof st.target === "string" ? st.target : "@inline";
@@ -448,7 +588,7 @@ function fieldTarget(st, allowXY) {
   sel.addEventListener("change", () => { xy.hidden = sel.value !== "@xy"; });
   sf.inlineTarget = typeof st.target === "object" ? st.target : null;
   return h("div", { class: "fld" }, h("label", { for: "f-target" }, "대상"),
-    h("div", { class: "inline" }, sel, h("button", { type: "button", onclick: () => { const v = sel.value; if (v && !v.startsWith("@")) testLocate(v); } }, "찾기")), xy);
+    h("div", { class: "inline" }, sel, h("button", { type: "button", onclick: () => { const v = sel.value; if (v && !v.startsWith("@") && !v.includes("${")) testLocate(v); } }, "찾기")), xy);
 }
 
 function fieldExpect(st) {
@@ -463,6 +603,26 @@ function fieldExpect(st) {
   const wrap = h("div", { class: "inline", hidden: !kind }, ts, "최대", numInput("f-exp-timeout", e.timeout ?? 3, { step: "0.5", min: "0" }), "초");
   sel.addEventListener("change", () => { wrap.hidden = !sel.value; });
   return h("div", { class: "fld" }, h("label", { for: "f-exp-kind" }, "실행 후 확인 (결과가 중요하면 꼭 지정)"), sel, wrap);
+}
+
+function fieldCond(st) {
+  const c = st.cond || {};
+  const simple = "visible" in c || "gone" in c || "expr" in c || !Object.keys(c).length;
+  const kind = "expr" in c ? "expr" : "gone" in c ? "gone" : simple ? "visible" : "json";
+  const sel = h("select", { id: "f-cond-kind" },
+    h("option", { value: "visible" }, "이 대상이 화면에 보이면"), h("option", { value: "gone" }, "이 대상이 화면에 없으면"),
+    h("option", { value: "expr" }, "계산식이 참이면"), !simple ? h("option", { value: "json" }, "복합 조건 (JSON 으로 편집)") : null);
+  sel.value = kind;
+  const tgt = c.visible ?? c.gone;
+  const ts = h("select", { id: "f-cond-target" }, targetOptions(tgt, false));
+  ts.value = typeof tgt === "string" ? tgt : "";
+  const tWrap = h("div", { class: "inline" }, ts, "최대", numInput("f-cond-timeout", c.timeout ?? 0, { step: "0.5", min: "0" }), "초 기다림");
+  const eWrap = h("div", { class: "inline" }, textInput("f-cond-expr", c.expr ?? "", { class: "wide mono", placeholder: "예) lot_read != lot   done >= 3   recipe == 'RCP_B'" }));
+  const show = () => { tWrap.hidden = !["visible", "gone"].includes(sel.value); eWrap.hidden = sel.value !== "expr"; };
+  sel.addEventListener("change", show); show();
+  sf.complexCond = simple ? null : c;
+  return h("div", { class: "fld" }, h("label", { for: "f-cond-kind" }, "조건"), sel, tWrap, eWrap,
+    h("p", { class: "hint" }, "계산식에서는 변수 이름을 ${} 없이 그대로 씁니다. 숫자처럼 보이는 판독값은 숫자로 비교됩니다."));
 }
 
 function fieldRegion(st) {
@@ -484,24 +644,40 @@ function renderStepForm() {
     else if (f === "target_only") box.append(fieldTarget(st, false));
     else if (f === "expect") box.append(fieldExpect(st));
     else if (f === "region") box.append(fieldRegion(st));
+    else if (f === "cond") box.append(fieldCond(st));
     else if (f === "timeout") box.append(h("label", {}, "대상 찾기 최대 대기(초)", numInput("f-timeout", st.timeout, { step: "0.5", min: "0", placeholder: a === "wait_for" || a === "wait_gone" ? "10" : "3" })));
     else if (f === "retry") box.append(h("label", {}, "실패 시 재시도 횟수", numInput("f-retry", st.retry, { min: "0", max: "5", placeholder: "0" })));
-    else if (f === "label") box.append(h("label", {}, "메모 (화면에 표시될 설명)", h("input", { id: "f-label", value: st.label ?? "" })));
-    else if (f === "text") box.append(h("label", {}, "입력할 글자 (영문·숫자·기호)", h("input", { id: "f-text", value: st.text ?? "" })));
+    else if (f === "label") box.append(h("label", {}, "메모 (화면에 표시될 설명)", textInput("f-label", st.label)));
+    else if (f === "text") box.append(h("label", {}, "입력할 글자 (영문·숫자·기호, ${변수} 가능)", textInput("f-text", st.text)));
     else if (f === "key") box.append(h("label", {}, "키", h("input", { id: "f-key", list: "key-list", value: st.key ?? "", placeholder: "enter, esc, f5…" })));
-    else if (f === "keys") box.append(h("label", {}, "조합키 (+로 연결)", h("input", { id: "f-keys", value: (st.keys || []).join("+"), placeholder: "ctrl+s, alt+f4…" })));
+    else if (f === "keys") box.append(h("label", {}, "조합키 (+로 연결)", textInput("f-keys", (st.keys || []).join("+"), { placeholder: "ctrl+s, alt+f4…" })));
     else if (f === "sec") box.append(h("label", {}, "대기 시간(초)", numInput("f-sec", st.sec ?? 1, { step: "0.1", min: "0" })));
-    else if (f === "name") box.append(h("label", {}, "값 이름", h("input", { id: "f-name", value: st.name ?? "", placeholder: "elapsed_s" })));
-    else if (f === "pattern") box.append(h("label", {}, "값 추출 정규식 (선택, 괄호 부분이 값)", h("input", { id: "f-pattern", class: "mono", value: st.pattern ?? "", placeholder: "^00:00:(\\d\\d\\.\\d\\d)$" })));
+    else if (f === "name") box.append(h("label", {}, "값 이름 (이후 ${이름} 으로 사용)", textInput("f-name", st.name, { placeholder: "elapsed_s" })));
+    else if (f === "pattern") box.append(h("label", {}, "값 추출 정규식 (선택, 괄호 부분이 값)", textInput("f-pattern", st.pattern, { class: "mono", placeholder: "^00:00:(\\d\\d\\.\\d\\d)$" })));
     else if (f === "range") box.append(h("div", { class: "fld" }, h("label", {}, "허용 범위 (선택 — 벗어나면 실패)"),
       h("div", { class: "inline" }, "최소", numInput("f-min", st.min, { step: "any" }), "최대", numInput("f-max", st.max, { step: "any" }))));
     else if (f === "vote") box.append(h("label", { class: "inline" }, h("input", { id: "f-vote", type: "checkbox", checked: !!st.vote }), "다수결 판독 (숫자 표시창처럼 오인식이 잦을 때)"));
     else if (f === "scenario") {
       const sel = h("select", { id: "f-scenario" }, S.scenarios.map((s) => h("option", { value: s.name }, s.name)));
       sel.value = st.scenario ?? ""; box.append(h("label", {}, "실행할 시나리오", sel));
-    }
+    } else if (f === "args") {
+      box.append(h("label", {}, "넘길 값 (한 줄에 이름=값, 선택)",
+        h("textarea", { id: "f-args", rows: 2, class: "mono" }, Object.entries(st.args || {}).map(([k, v]) => `${k}=${v}`).join("\n"))));
+    } else if (f === "setv") {
+      const mode = st.expr !== undefined ? "expr" : "value";
+      const msel = h("select", { id: "f-set-mode" }, h("option", { value: "value" }, "값 그대로"), h("option", { value: "expr" }, "계산식 결과"));
+      msel.value = mode;
+      box.append(h("label", {}, "변수 이름", textInput("f-set-name", st.name, { placeholder: "done" })),
+        h("div", { class: "fld" }, h("label", {}, "넣을 값"), h("div", { class: "inline" }, msel,
+          textInput("f-set-val", mode === "expr" ? st.expr : (st.value ?? ""), { class: "wide mono", placeholder: "0  /  done + 1" }))));
+    } else if (f === "times") box.append(h("label", {}, "반복 횟수 (숫자 또는 ${변수})", textInput("f-times", st.times ?? 3)));
+    else if (f === "items") box.append(h("label", {}, "항목 목록 (쉼표로 구분, 또는 ${파라미터})", textInput("f-items", Array.isArray(st.items) ? st.items.join(",") : st.items, { placeholder: "LOT-A,LOT-B  또는  ${lots}" })));
+    else if (f === "var") box.append(h("label", {}, `반복 변수 이름 (기본 ${VAR_DEFAULT[a]}${a === "for_each" ? ", 몇 번째인지는 이름_index" : ", 1부터"})`, textInput("f-var", st.var, { placeholder: VAR_DEFAULT[a] })));
+    else if (f === "max") box.append(h("label", {}, "최대 반복 횟수 (무한 반복 방지)", numInput("f-maxiter", st.max ?? 100, { min: "1" })));
+    else if (f === "message") box.append(h("label", {}, "실패 메시지 (${변수} 가능)", textInput("f-message", st.message)));
   }
   $("#sf-json").value = JSON.stringify(st, null, 2);
+  renderVarsHint();
 }
 
 function readStepForm() {
@@ -511,6 +687,7 @@ function readStepForm() {
   const a = sf.action, st = { action: a };
   const v = (id) => { const el = $(`#${id}`); return el ? el.value.trim() : ""; };
   const num = (id) => (v(id) === "" ? undefined : Number(v(id)));
+  const numOrVar = (id) => { const x = v(id); return x === "" ? undefined : (/^-?\d+(\.\d+)?$/.test(x) ? Number(x) : x); };
   for (const f of ACTIONS[a].fields) {
     if (f === "target" || f === "target_only") {
       const t = v("f-target");
@@ -524,6 +701,16 @@ function readStepForm() {
         const t = v("f-exp-target");
         if (!t) throw new Error("확인할 대상을 선택하세요");
         st.expect = { [k]: t === "@inline" ? sf.inlineExpect : t, timeout: num("f-exp-timeout") ?? 3 };
+      }
+    } else if (f === "cond") {
+      const k = v("f-cond-kind");
+      if (k === "json") st.cond = sf.complexCond;
+      else if (k === "expr") { if (!v("f-cond-expr")) throw new Error("계산식을 입력하세요"); st.cond = { expr: v("f-cond-expr") }; }
+      else {
+        const t = v("f-cond-target");
+        if (!t) throw new Error("조건 대상을 선택하세요");
+        st.cond = { [k]: t };
+        if (num("f-cond-timeout")) st.cond.timeout = num("f-cond-timeout");
       }
     } else if (f === "region") {
       const r = [0, 1, 2, 3].map((i) => num(`f-r${i}`));
@@ -541,16 +728,38 @@ function readStepForm() {
     else if (f === "range") { if (num("f-min") !== undefined) st.min = num("f-min"); if (num("f-max") !== undefined) st.max = num("f-max"); }
     else if (f === "vote") { if ($("#f-vote").checked) st.vote = true; }
     else if (f === "scenario") st.scenario = v("f-scenario");
+    else if (f === "args") {
+      const args = {};
+      for (const line of $("#f-args").value.split("\n")) {
+        if (!line.trim()) continue;
+        const at = line.indexOf("=");
+        if (at < 1) throw new Error(`넘길 값 형식은 이름=값: ${line}`);
+        args[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+      }
+      if (Object.keys(args).length) st.args = args;
+    } else if (f === "setv") {
+      st.name = v("f-set-name");
+      if (!st.name) throw new Error("변수 이름을 입력하세요");
+      if (v("f-set-mode") === "expr") st.expr = v("f-set-val");
+      else st.value = numOrVar("f-set-val") ?? "";
+    } else if (f === "times") st.times = numOrVar("f-times") ?? 1;
+    else if (f === "items") st.items = v("f-items");
+    else if (f === "var") { if (v("f-var")) st.var = v("f-var"); }
+    else if (f === "max") st.max = num("f-maxiter") ?? 100;
+    else if (f === "message") { if (v("f-message")) st.message = v("f-message"); }
   }
+  for (const [k] of CHILD_KEYS[a] || []) st[k] = Array.isArray(sf.step[k]) ? sf.step[k] : [];   // 안쪽 스텝 유지
   return st;
 }
+function readStepFormSafe() { const open = $("#sf-adv").open; $("#sf-adv").open = false; try { return readStepForm(); } finally { $("#sf-adv").open = open; } }
 
-function openStepForm(step = null, index = null) {
-  S.editIndex = index;
-  sf.step = step ? { ...step } : {};
-  sf.action = step?.action || sf.action || "click";
+function openStepForm(step = null, lp = [], index = null) {
+  S.editPath = { lp, i: index };
+  sf.step = step ? JSON.parse(JSON.stringify(step)) : {};
+  sf.action = step?.action || (ACTIONS[sf.action] ? sf.action : "click");
   $("#sf-action").value = sf.action;
-  $("#step-form-title").textContent = index === null ? "스텝 추가" : `스텝 ${index} 편집`;
+  const where = lp.length ? ` (${lp.map(([i, k]) => `${i}번 ${k === "then" ? "그러면" : k === "else" ? "아니면" : "반복"}`).join(" › ")} 안)` : "";
+  $("#step-form-title").textContent = index === null ? `스텝 추가${where}` : `스텝 ${index} 편집${where}`;
   $("#sf-save").textContent = index === null ? "추가" : "수정";
   $("#sf-adv").open = false;
   msg($("#sf-msg"), "");
@@ -558,35 +767,44 @@ function openStepForm(step = null, index = null) {
   renderStepForm(); renderSteps();
   $("#step-form").scrollIntoView({ block: "nearest" });
 }
-function editStep(i) { openStepForm(S.scen.steps[i], i); }
 
-$("#sf-action").append(...Object.entries(ACTIONS).map(([k, d]) => h("option", { value: k }, d.label)));
+for (const [g, acts] of ACTION_GROUPS) $("#sf-action").append(h("optgroup", { label: g }, acts.map((k) => h("option", { value: k }, ACTIONS[k].label))));
 $("#sf-action").addEventListener("change", (e) => {
   let keep = {};
-  try { keep = readStepForm(); } catch { /* 입력 중 */ }
+  try { keep = readStepFormSafe(); } catch { /* 입력 중 */ }
   sf.action = e.target.value; sf.step = { ...keep, action: sf.action }; renderStepForm();
 });
-$("#step-add").addEventListener("click", () => openStepForm());
-$("#step-cancel").addEventListener("click", () => { $("#step-form").hidden = true; S.editIndex = null; renderSteps(); });
+$("#step-add").addEventListener("click", () => openStepForm(null, [], null));
+$("#step-cancel").addEventListener("click", () => { $("#step-form").hidden = true; S.editPath = null; renderSteps(); });
 $("#sf-adv").addEventListener("toggle", () => { if ($("#sf-adv").open) { try { $("#sf-json").value = JSON.stringify(readStepFormSafe(), null, 2); } catch { /* 유지 */ } } });
-function readStepFormSafe() { const open = $("#sf-adv").open; $("#sf-adv").open = false; try { return readStepForm(); } finally { $("#sf-adv").open = open; } }
 
 $("#step-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   let st;
   try { st = readStepForm(); } catch (err) { return msg($("#sf-msg"), err.message, "bad"); }
-  const r = await api("POST", "/api/validate", { name: "check", steps: [st] });
-  if (r.errors.length) return msg($("#sf-msg"), r.errors.join("\n"), "bad");
-  if (S.editIndex === null) S.scen.steps.push(st); else S.scen.steps[S.editIndex] = st;
+  const { lp, i } = S.editPath;
+  // 시나리오 전체 맥락에서 검증 (반복 변수·파라미터를 알아야 하므로) → 이 스텝 관련 오류만 표시
+  const steps = JSON.parse(JSON.stringify(S.scen.steps));
+  const arr = listAt(lp, steps);
+  const pos = i === null ? arr.length : i;
+  if (i === null) arr.push(st); else arr[i] = st;
+  const vp = validIndex(lp, pos);
+  const r = await api("POST", "/api/validate", { ...currentScenario(), steps });
+  const mine = r.errors.filter((x) => (x.startsWith(`step[${vp}]`) || x.startsWith(`step[${vp} `))
+                                     && !/비어 있음|then 또는 else/.test(x));
+  if (mine.length) return msg($("#sf-msg"), mine.join("\n"), "bad");
+  const target = listAt(lp);
+  if (i === null) target.push(st); else target[i] = st;
   S.stepResults = {};
-  $("#step-form").hidden = true; S.editIndex = null;
+  $("#step-form").hidden = true; S.editPath = null;
   renderSteps(); markDirty();
 });
 $("#sf-try").addEventListener("click", async () => {
   let st;
   try { st = readStepForm(); } catch (err) { return msg($("#sf-msg"), err.message, "bad"); }
   msg($("#sf-msg"), "실행 중…", "info");
-  const r = await tryStep(st, S.editIndex);
+  const { lp, i } = S.editPath || { lp: [], i: null };
+  const r = await tryStep(st, i === null ? null : lp, i);
   if (r) msg($("#sf-msg"), `${r.ok ? "✓ 성공" : "✗ 실패"}: ${r.message} (${r.elapsed}s)`, r.ok ? "ok" : "bad");
   else msg($("#sf-msg"), "실행하지 못했습니다. 로그를 확인하세요.", "bad");
 });
@@ -623,25 +841,41 @@ $("#scen-json-toggle").addEventListener("click", () => {
   } catch (err) { msg($("#scen-msg"), `JSON 오류: ${err.message}`, "bad"); }
 });
 
-$("#scen-run").addEventListener("click", async () => {
+// ---- 실행 (파라미터가 있으면 값 입력 후)
+$("#scen-run").addEventListener("click", () => {
+  const rows = S.paramRows.filter((r) => r.name.trim());
+  if (!rows.length) return startRun({});
+  const f = $("#run-fields"); f.replaceChildren();
+  for (const r of rows) f.append(h("label", {}, `${r.name}${r.description ? ` — ${r.description}` : ""}`, textInput(`run-p-${r.name}`, r.default, { "data-param": r.name })));
+  $("#run-form").hidden = false;
+  f.querySelector("input")?.focus();
+});
+$("#run-cancel").addEventListener("click", () => { $("#run-form").hidden = true; });
+$("#run-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const params = {};
+  $$("#run-fields input").forEach((i) => { params[i.dataset.param] = i.value; });
+  $("#run-form").hidden = true;
+  startRun(params);
+});
+
+async function startRun(params) {
   try {
     S.stepResults = {};
-    await api("POST", "/api/run", currentScenario());
+    await api("POST", "/api/run", { scenario: currentScenario(), params });
     $("#scen-run").disabled = true; $("#scen-stop").disabled = false;
-    msg($("#scen-msg"), "실행 중…", "info");
+    msg($("#scen-msg"), `실행 중…${Object.keys(params).length ? ` ${JSON.stringify(params)}` : ""}`, "info");
     S.runPoll = setInterval(pollRun, 600);
   } catch (err) { msg($("#scen-msg"), err.message, "bad"); }
-});
+}
 $("#scen-stop").addEventListener("click", () => api("POST", "/api/run/stop"));
 
 async function pollRun() {
   const r = await api("GET", "/api/run");
-  for (const sr of r.steps) {
-    if (/^\d+$/.test(sr.index)) S.stepResults[Number(sr.index)] = sr;   // 최상위 스텝만 (하위·핸들러·복귀 제외)
-  }
-  const done = Object.keys(S.stepResults).map(Number);
-  const next = done.length ? Math.max(...done) + 1 : 0;
-  renderSteps(r.running ? next : null);
+  for (const sr of r.steps) S.stepResults[sr.index] = sr;
+  const top = Object.keys(S.stepResults).filter((k) => /^\d+$/.test(k)).map(Number);
+  S.runningIdx = r.running ? String(top.length ? Math.max(...top) + 1 : 0) : null;
+  renderSteps();
   if (!r.running) {
     clearInterval(S.runPoll); S.runPoll = null;
     $("#scen-run").disabled = false; $("#scen-stop").disabled = true;

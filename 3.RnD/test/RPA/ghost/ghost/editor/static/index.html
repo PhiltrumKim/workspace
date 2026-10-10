@@ -60,6 +60,12 @@
         <label>이름 <input id="scen-name" placeholder="영문_숫자 (예: run_recipe)"></label>
         <label>설명 <input id="scen-desc" placeholder="무엇을 하는 시나리오인지"></label>
       </div>
+      <details class="params" id="params-box">
+        <summary>실행 파라미터 <span class="hint" id="params-count"></span></summary>
+        <p class="hint">실행할 때마다 바뀌는 값(예: LOT 목록). 스텝에서 <span class="mono">${이름}</span> 으로 씁니다.</p>
+        <table class="ptable"><thead><tr><th>이름</th><th>기본값</th><th>설명</th><th></th></tr></thead><tbody id="params-rows"></tbody></table>
+        <button id="param-add" class="add small">+ 파라미터</button>
+      </details>
       <div class="row wrap">
         <button id="scen-save" class="primary">저장</button>
         <button id="scen-validate">검증</button>
@@ -67,6 +73,11 @@
         <button id="scen-stop" class="danger" disabled>■ 중지</button>
         <button id="scen-json-toggle" class="ghost">JSON</button>
       </div>
+      <form class="card run-form" id="run-form" hidden>
+        <div class="form-head"><b>실행 값 입력</b><button type="button" class="ghost" id="run-cancel">닫기</button></div>
+        <div id="run-fields" class="field-grid"></div>
+        <div class="row"><button type="submit" class="go">▶ 이 값으로 실행</button></div>
+      </form>
       <div class="msg" id="scen-msg" hidden></div>
       <textarea id="scen-json" class="json" hidden spellcheck="false"></textarea>
       <ol class="steps" id="steps"></ol>
@@ -75,6 +86,7 @@
         <div class="form-head"><b id="step-form-title">스텝 추가</b><button type="button" class="ghost" id="step-cancel">닫기</button></div>
         <label>동작 <select id="sf-action"></select></label>
         <div id="sf-fields"></div>
+        <p class="hint vars-hint" id="sf-vars"></p>
         <details id="sf-adv"><summary>JSON으로 편집</summary><textarea id="sf-json" class="json small" spellcheck="false"></textarea></details>
         <div class="row wrap">
           <button type="submit" class="primary" id="sf-save">추가</button>
