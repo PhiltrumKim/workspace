@@ -63,6 +63,20 @@ def rss_mb() -> Optional[float]:
         return None
 
 
+def keep_awake(on: bool) -> bool:
+    """운영 중 Windows 절전 진입 막기 (전원 설정은 바꾸지 않음 — 프로세스가 끝나면 자동 해제).
+    우분투(TX)는 systemd 서비스로 돌리고 절전을 끄는 것이 전제라 아무것도 하지 않는다."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        flags = ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0)
+        return bool(ctypes.windll.kernel32.SetThreadExecutionState(flags))
+    except Exception:
+        return False
+
+
 class Operator:
     def __init__(self, cfg: dict, device, runner, store: Store, lock: threading.Lock,
                  log: Optional[Callable[[str], None]] = None):
@@ -154,6 +168,14 @@ class Operator:
         return sc
 
     def _loop(self) -> None:
+        if self.o.get("keep_awake", True):
+            keep_awake(True)                         # 실행 상태 플래그는 스레드별 → 실행기 스레드에서 설정
+        try:
+            self._loop_body()
+        finally:
+            keep_awake(False)
+
+    def _loop_body(self) -> None:
         while not self._stop.is_set():
             try:
                 self._health()

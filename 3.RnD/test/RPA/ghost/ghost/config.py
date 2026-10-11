@@ -61,6 +61,7 @@ DEFAULTS = {
         "reconnect_backoff": [5, 15, 30],   # 장치 재연결 시도 간격(초). 모두 실패하면 운영 정지(halted)
         "poll_sec": 1.0,
         "health_every_min": 10,        # 메모리·장치 상태 기록 주기
+        "keep_awake": True,            # 운영 중 Windows 절전 막기 (전원 설정 변경 없음)
     },
     "blackbox": {
         "enabled": True,
