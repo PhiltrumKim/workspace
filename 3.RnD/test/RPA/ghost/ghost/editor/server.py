@@ -59,14 +59,20 @@ class EditorApp:
         self.runner.on_step = self._on_step
         self.scen_dir = config.path(cfg, "scenarios")
         self.runs_dir = config.path(cfg, "runs")
+        from ..ops import Operator, Store
+        self.store = Store(os.path.join(config.path(cfg, "data"), cfg["ops"]["db"]))
+        self.ops = Operator(cfg, self.dev, self.runner, self.store, self.lock, log=self.log)
 
     # ------------------------------------------------------------ 수명주기·로그
     def open(self) -> None:
         self.dev.open(home=True)
 
     def close(self) -> None:
+        if self.ops.state != "stopped":
+            self.ops.stop()
         self.runner.stop_event.set()
         self.dev.close()
+        self.store.close()
 
     def log(self, msg: str) -> None:
         with self._log_lock:
@@ -78,7 +84,8 @@ class EditorApp:
             return {"seq": self._seq, "lines": [x for x in self._logs if x["seq"] > after]}
 
     def _on_step(self, sr) -> None:
-        self.run["steps"].append(sr.__dict__.copy())
+        if self.run["running"]:                         # 운영 실행기의 작업은 편집기 실행 화면에 섞지 않음
+            self.run["steps"].append(sr.__dict__.copy())
 
     # ------------------------------------------------------------ 화면
     def frame(self) -> np.ndarray:
@@ -109,7 +116,8 @@ class EditorApp:
                 "port": None if self.sim else self.cfg["hardware"]["port"],
                 "busy": self.lock.locked(), "running": self.run["running"],
                 "cursor": list(self.dev.pos), "targets": len(self.reg.targets),
-                "keys": sorted(keymap.KEYS)}
+                "keys": sorted(keymap.KEYS), "ops": self.ops.state,
+                "ops_job": self.ops.current["id"] if self.ops.current else None}
 
     # ------------------------------------------------------------ 대상(target)
     def targets(self) -> list:
@@ -240,6 +248,8 @@ class EditorApp:
     # ------------------------------------------------------------ 실행
     def _acquire(self):
         if not self.lock.acquire(blocking=False):
+            if self.ops.current:
+                raise ApiError(409, f"운영 작업 {self.ops.current['id']} ({self.ops.current['scenario']}) 실행 중입니다")
             raise ApiError(409, "다른 동작이 실행 중입니다")
 
     def run_step(self, st: dict, variables: Optional[dict] = None) -> dict:
@@ -313,6 +323,85 @@ class EditorApp:
             self.lock.release()
         self.log(f"[편집기] 직접 조작 {kind} {d.get('x', '')} {d.get('y', '')} {d.get('text', '') or d.get('key', '') or ''}")
         return {"ok": True, "cursor": list(self.dev.pos)}
+
+    # ------------------------------------------------------------ 무인 운영
+    def ops_status(self) -> dict:
+        return self.ops.status()
+
+    def ops_submit(self, d: dict) -> dict:
+        name = d.get("scenario")
+        if not name:
+            raise ApiError(400, "시나리오를 고르세요")
+        try:
+            n = max(1, min(100, int(d.get("count", 1))))
+            ids = [self.ops.submit(name, d.get("params") or {}, source=d.get("source", "편집기")) for _ in range(n)]
+        except (ValueError, model.ScenarioError) as e:
+            raise ApiError(400, str(e))
+        return {"ids": ids}
+
+    def ops_control(self, d: dict) -> dict:
+        act = d.get("action")
+        if act == "start":
+            self.ops.start()
+        elif act == "stop":
+            self.ops.stop()
+        elif act == "pause":
+            self.ops.pause()
+        elif act == "resume":
+            self.ops.resume()
+        elif act == "stop_current":
+            self.ops.stop_current()
+        else:
+            raise ApiError(400, f"알 수 없는 동작: {act}")
+        return self.ops.status()
+
+    def ops_schedules(self) -> list:
+        from ..ops import schedule as sched
+        now = time.time()
+        out = []
+        for s in self.store.schedules():
+            s["describe"] = sched.describe(s)
+            s["next_run"] = sched.next_run(s, now)
+            out.append(s)
+        return out
+
+    def ops_save_schedule(self, d: dict, sid: Optional[int] = None) -> dict:
+        from ..ops import schedule as sched
+        cur = self.store.schedule(sid) if sid else {}
+        if sid and not cur:
+            raise ApiError(404, "없는 예약")
+        m = {**(cur or {}), **d}
+        days = [int(x) for x in (m.get("days") or [])]
+        times = [str(t).strip() for t in (m.get("times") or []) if str(t).strip()]
+        errs = sched.validate(m.get("kind"), m.get("every_min"), times, days)
+        if not m.get("name"):
+            errs.append("예약 이름을 입력하세요")
+        if not m.get("scenario"):
+            errs.append("시나리오를 고르세요")
+        else:
+            try:
+                self.ops._load(m["scenario"], m.get("params") or {})
+            except (ValueError, model.ScenarioError) as e:
+                errs.append(str(e))
+        if errs:
+            raise ApiError(400, "; ".join(errs))
+        f = dict(name=m["name"], scenario=m["scenario"], params=m.get("params") or {}, kind=m["kind"],
+                 every_min=float(m["every_min"]) if m["kind"] == "interval" else None, times=times, days=days,
+                 enabled=1 if m.get("enabled", 1) else 0)
+        if sid:
+            self.store.set_schedule(sid, **f)
+        else:
+            sid = self.store.add_schedule(**{**f, "enabled": bool(f["enabled"])})
+        self.store.add_event("schedule_saved", f"'{f['name']}' ({sched.describe(f)})")
+        return self.store.schedule(sid)
+
+    def ops_report(self, q: dict):
+        from ..ops import report
+        try:
+            a, b = report.period(float(q["days"]) if q.get("days") else None, q.get("since"), q.get("until"))
+        except ValueError as e:
+            raise ApiError(400, str(e))
+        return report, a, b
 
     # ------------------------------------------------------------ 실행 기록
     def runs(self, limit: int = 30) -> list:
@@ -465,7 +554,46 @@ def make_handler(app: EditorApp):
                 return self._json(a.run_detail(p[1]))
             if key == ("GET", "runs") and len(p) == 3:
                 return self._file(a.run_file(p[1], p[2]))
+            if p and p[0] == "ops":
+                return self._ops(m, p[1:], q)
             raise ApiError(404, f"없는 API: {m} /{'/'.join(p)}")
+
+        def _ops(self, m: str, p: list, q: dict):
+            a = app
+            key = (m, p[0] if p else "")
+            if key == ("GET", "status"):
+                return self._json(a.ops_status())
+            if key == ("POST", "control"):
+                return self._json(a.ops_control(self._body()))
+            if key == ("GET", "jobs") and len(p) == 1:
+                return self._json(a.store.jobs(int(q.get("limit", 100)), q.get("status") or None))
+            if key == ("POST", "jobs"):
+                return self._json(a.ops_submit(self._body()))
+            if key == ("DELETE", "jobs") and len(p) == 2:
+                return self._json({"cancelled": a.store.cancel(int(p[1]))})
+            if key == ("GET", "schedules"):
+                return self._json(a.ops_schedules())
+            if key == ("POST", "schedules"):
+                return self._json(a.ops_save_schedule(self._body()))
+            if key == ("PUT", "schedules") and len(p) == 2:
+                return self._json(a.ops_save_schedule(self._body(), int(p[1])))
+            if key == ("DELETE", "schedules") and len(p) == 2:
+                a.store.delete_schedule(int(p[1]))
+                return self._json({"deleted": True})
+            if key == ("GET", "events"):
+                return self._json(a.store.events(int(q.get("limit", 100))))
+            if key == ("GET", "report"):
+                rep, s, u = a.ops_report(q)
+                return self._json(rep.summarize(a.store, s, u))
+            if key == ("GET", "report.html"):
+                rep, s, u = a.ops_report(q)
+                return self._send(200, rep.render_html(rep.summarize(a.store, s, u)).encode("utf-8"),
+                                  "text/html; charset=utf-8")
+            if key == ("GET", "jobs.csv"):
+                rep, s, u = a.ops_report(q)
+                return self._send(200, rep.jobs_csv(a.store, s).encode("utf-8"), "text/csv; charset=utf-8",
+                                  {"Content-Disposition": "attachment; filename=ghost_jobs.csv"})
+            raise ApiError(404, f"없는 API: {m} /ops/{'/'.join(p)}")
 
         def do_GET(self):
             self._dispatch("GET")

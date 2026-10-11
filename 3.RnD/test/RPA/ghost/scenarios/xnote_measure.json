@@ -7,6 +7,8 @@
   "steps": [
     { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창",
       "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+    { "action": "key", "key": "home", "label": "입력칸에 남은 글자 선택 (이전 실행이 중간에 끊긴 경우)" },
+    { "action": "hotkey", "keys": ["shift", "end"] },
     { "action": "type", "text": "%USERPROFILE%\\Desktop\\XNote Stopwatch\\xnsw.exe" },
     { "action": "key", "key": "enter", "label": "스톱워치 실행",
       "expect": { "visible": "xn_display", "timeout": 10 } },

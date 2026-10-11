@@ -48,6 +48,7 @@
       <button role="tab" data-tab="scenario" class="on">시나리오</button>
       <button role="tab" data-tab="targets">대상</button>
       <button role="tab" data-tab="runs">실행 기록</button>
+      <button role="tab" data-tab="ops">운영</button>
     </nav>
 
     <!-- 시나리오 탭 -->
@@ -133,6 +134,76 @@
       <div class="row"><button id="runs-refresh">새로고침</button></div>
       <ul class="runs" id="runs"></ul>
       <div id="run-detail"></div>
+    </div>
+    <!-- 운영 탭 -->
+    <div class="tab" id="tab-ops" hidden>
+      <div class="card ops-state" id="ops-state">
+        <div class="form-head"><b>무인 운영 <span class="opbadge" id="ops-badge">-</span></b>
+          <span class="hint" id="ops-mem"></span></div>
+        <div class="msg bad" id="ops-halt" hidden></div>
+        <div id="ops-current" class="hint">진행 중인 작업 없음</div>
+        <div class="ops-counts" id="ops-counts"></div>
+        <div class="row wrap">
+          <button id="ops-start" class="go">▶ 운영 시작</button>
+          <button id="ops-pause">일시정지</button>
+          <button id="ops-resume" class="go">계속</button>
+          <button id="ops-stop" class="danger">운영 중지</button>
+          <button id="ops-stop-cur" class="danger" title="지금 실행 중인 작업만 중지">현재 작업 중지</button>
+        </div>
+        <p class="hint">일시정지: 진행 중 작업은 끝까지 하고 새 작업을 꺼내지 않습니다. 장치가 끊기면 자동으로 다시 연결하고, 끝내 안 되면 <b>장치 정지</b> 상태로 멈춥니다.</p>
+      </div>
+
+      <details class="card" id="ops-add-box" open>
+        <summary><b>작업 넣기</b></summary>
+        <div class="row"><select id="ops-scen" aria-label="시나리오"></select>
+          <label class="inl">횟수 <input id="ops-count" type="number" min="1" max="100" value="1"></label></div>
+        <div id="ops-params" class="field-grid"></div>
+        <div class="row"><button id="ops-submit" class="primary">대기열에 추가</button></div>
+        <div class="msg" id="ops-msg" hidden></div>
+      </details>
+
+      <details class="card" id="ops-sched-box">
+        <summary><b>예약</b> <span class="hint" id="ops-sched-count"></span></summary>
+        <ul class="ops-list" id="ops-scheds"></ul>
+        <form id="sched-form" class="grid-form">
+          <label>예약 이름 <input id="sc-name" placeholder="예: 아침 점검" required></label>
+          <label>시나리오 <select id="sc-scen"></select></label>
+          <div class="seg" role="radiogroup" aria-label="예약 종류">
+            <button type="button" data-skind="interval" class="on">주기</button>
+            <button type="button" data-skind="daily">매일 정해진 시각</button>
+          </div>
+          <label id="sc-every-l">간격(분) <input id="sc-every" type="number" min="1" value="60"></label>
+          <div id="sc-daily" hidden>
+            <label>시각 <input id="sc-times" placeholder="08:00, 20:00"></label>
+            <div class="days" id="sc-days"></div>
+          </div>
+          <div id="sc-params" class="field-grid"></div>
+          <div class="row"><button type="submit" class="primary" id="sc-save">예약 추가</button>
+            <button type="button" class="ghost" id="sc-reset" hidden>새 예약으로</button></div>
+          <div class="msg" id="sc-msg" hidden></div>
+        </form>
+      </details>
+
+      <div class="card">
+        <div class="form-head"><b>작업 목록</b>
+          <select id="ops-filter" aria-label="상태 필터">
+            <option value="">전체</option><option value="queued">대기</option><option value="ok">성공</option>
+            <option value="failed">실패</option><option value="error">장치 오류</option></select></div>
+        <ul class="ops-list" id="ops-jobs"></ul>
+      </div>
+
+      <div class="card">
+        <div class="form-head"><b>보고서</b>
+          <select id="rep-days" aria-label="기간"><option value="1">최근 1일</option><option value="7" selected>최근 7일</option><option value="30">최근 30일</option></select></div>
+        <table class="ptable" id="rep-table"></table>
+        <div class="row wrap"><a class="btnlink" id="rep-html" target="_blank">보고서 열기 (HTML)</a>
+          <a class="btnlink" id="rep-csv">CSV 받기</a></div>
+      </div>
+
+      <details class="card">
+        <summary><b>운영 이벤트</b></summary>
+        <ul class="ops-events" id="ops-events"></ul>
+      </details>
     </div>
   </section>
 </main>

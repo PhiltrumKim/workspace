@@ -10,6 +10,8 @@
   python -m ghost watch rules.json [--duration 60]               화면 상시 감시 (시나리오 없이)
   python -m ghost run my.json --watch rules.json                 실행 중 추가 감시 규칙 적용
   python -m ghost editor [--sim]                                 시나리오 편집기 (http://127.0.0.1:8765)
+  python -m ghost ops [--sim]                                    무인 운영 시작 (편집기 '운영' 탭에서 대기열·예약 관리)
+  python -m ghost report [--days 7] [--out r.html] [--csv j.csv] 운영 결과 보고서
   python -m ghost fetch-models                                   한국어 OCR 모델 다운로드
   python -m ghost ocr [shot.png] [--region x,y,w,h]              화면 글자/좌표 출력 (target·read 영역 잡기용)
   python -m ghost add-target NAME --text "저장 안 함" [--box ..]   텍스트(OCR) target 등록
@@ -248,9 +250,16 @@ def cmd_editor(args) -> int:
     from .editor import EditorApp, serve
     cfg = _cfg(args, sim=args.sim)
     app = EditorApp(cfg, sim=args.sim)
+    if getattr(args, "echo", False):                 # ghost ops: 운영 로그를 콘솔에도
+        inner = app.log
+        app.log = lambda m: (inner(m), _log(m))
+        app.ops.log = app.log
     _log(f"[편집기] 장치 연결 중 ({'시뮬레이터' if args.sim else '실장비 ' + cfg['hardware']['port']})...")
     app.open()
     httpd = serve(app, args.port)
+    if getattr(args, "ops", False):
+        app.ops.start()
+        _log(f"[운영] 무인 운영 시작 — 대기열·예약·보고서: http://127.0.0.1:{args.port}/#ops")
     _log(f"[편집기] 브라우저에서 여세요: http://127.0.0.1:{args.port}   (종료: Ctrl+C)")
     try:
         httpd.serve_forever()
@@ -259,6 +268,41 @@ def cmd_editor(args) -> int:
     finally:
         httpd.shutdown()
         app.close()
+    return 0
+
+
+def cmd_report(args) -> int:
+    from .ops import Store, report
+    cfg = _cfg(args)
+    db = os.path.join(config.path(cfg, "data"), cfg["ops"]["db"])
+    if not os.path.isfile(db):
+        _log(f"  ✗ 운영 기록 없음: {db}")
+        return 1
+    store = Store(db)
+    try:
+        since, until = report.period(args.days, args.since, args.until)
+    except ValueError as e:
+        _log(f"  ✗ {e}")
+        return 2
+    s = report.summarize(store, since, until)
+    _log(f"기간 {report._ts(s['since'] or s['first'])} ~ {report._ts(s['until'] or s['last'])}: "
+         f"{s['total']}회, 성공률 {s['success_rate']}%, 장치 재연결 {s['events'].get('reconnect_ok', 0)}회")
+    for sc in s["scenarios"]:
+        d = sc["duration"]
+        _log(f"  {sc['scenario']:<24} {sc['runs']:>4}회  성공률 {sc['success_rate']:>5}%  "
+             + (f"평균 {d['mean']}s p95 {d['p95']}s" if d else "") + (f"  알람 {sc['watch']}" if sc["watch"] else ""))
+        for k, v in sc["value_stats"].items():
+            _log(f"      {k}: n={v['n']} 최소 {v['min']:g} 최대 {v['max']:g} 평균 {v['mean']:g}")
+        for msg, n in sc["top_errors"][:3]:
+            _log(f"      ✗ {n}회 {msg}")
+    out = args.out or os.path.join(config.path(cfg, "data"), "report_" + time.strftime("%Y%m%d_%H%M") + ".html")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(report.render_html(s))
+    _log(f"보고서: {os.path.abspath(out)}")
+    if args.csv:
+        with open(args.csv, "w", encoding="utf-8", newline="") as f:
+            f.write(report.jobs_csv(store, since))
+        _log(f"CSV: {os.path.abspath(args.csv)}")
     return 0
 
 
@@ -386,6 +430,19 @@ def main(argv=None) -> int:
     s.add_argument("--sim", action="store_true", help="시뮬레이터로 실행")
     s.add_argument("--port", type=int, default=8765)
     s.set_defaults(fn=cmd_editor)
+
+    s = sub.add_parser("ops", help="무인 운영 (편집기 서버 + 운영 실행기 자동 시작)")
+    s.add_argument("--sim", action="store_true")
+    s.add_argument("--port", type=int, default=8765)
+    s.set_defaults(fn=cmd_editor, ops=True, echo=True)
+
+    s = sub.add_parser("report", help="운영 결과 보고서 (HTML·CSV)")
+    s.add_argument("--days", type=float, default=7, help="최근 N일 (기본 7)")
+    s.add_argument("--since", help="시작 YYYY-MM-DD[ HH:MM] (--days 대신)")
+    s.add_argument("--until", help="끝 YYYY-MM-DD[ HH:MM]")
+    s.add_argument("--out", help="HTML 저장 경로 (기본 data/report_시각.html)")
+    s.add_argument("--csv", help="작업 목록 CSV 저장 경로")
+    s.set_defaults(fn=cmd_report)
 
     s = sub.add_parser("fetch-models", help="한국어 OCR 인식 모델 다운로드")
     s.add_argument("--force", action="store_true")

@@ -51,6 +51,16 @@ DEFAULTS = {
         "objects": "objects",
         "scenarios": "scenarios",
         "runs": "runs",
+        "data": "data",
+    },
+    # 무인 운영 (대기열·예약·장치 복구)
+    "ops": {
+        "db": "ghost_ops.db",          # paths.data 아래
+        "max_attempts": 2,             # 장치 오류로 끝난 작업의 최대 시도 횟수
+        "retry_failed": False,         # 시나리오 실패도 재시도할지 (같은 시료 중복 처리 위험 → 기본 끔)
+        "reconnect_backoff": [5, 15, 30],   # 장치 재연결 시도 간격(초). 모두 실패하면 운영 정지(halted)
+        "poll_sec": 1.0,
+        "health_every_min": 10,        # 메모리·장치 상태 기록 주기
     },
     "blackbox": {
         "enabled": True,
@@ -94,6 +104,7 @@ DEFAULTS = {
 
 # 시뮬레이터는 캡처 지연이 없으므로 대기 시간을 줄인다
 SIM_OVERRIDES = {
+    "ops": {"reconnect_backoff": [0.1, 0.1, 0.1], "poll_sec": 0.1},
     "blackbox": {"video": {"enabled": False}},     # 시뮬레이터 기본은 영상 끔 (테스트에서 필요 시 켬)
     "timing": {"move_step": 0.0, "capture_latency": 0.0, "jiggle_settle": 0.0, "click_hold": 0.0, "click_settle": 0.05,
                "key_hold": 0.0, "key_gap": 0.0, "poll": 0.05},

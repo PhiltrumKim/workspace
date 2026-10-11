@@ -3,6 +3,8 @@
   "name": "xn_safe_close",
   "description": "XNote Stopwatch 종료 (메뉴 Close). 정상 종료와 안전 복귀(on_abort)에서 공용",
   "steps": [
+    { "action": "if", "cond": { "visible": "run_prompt" }, "label": "실행 창이 남아 있으면 닫기",
+      "then": [ { "action": "key", "key": "esc" } ] },
     { "action": "key", "key": "esc", "label": "열린 메뉴가 있으면 닫기" },
     { "action": "right_click", "target": "xn_display", "timeout": 3,
       "expect": { "visible": "menu_close", "timeout": 3 }, "retry": 1 },

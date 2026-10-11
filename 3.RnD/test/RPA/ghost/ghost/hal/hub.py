@@ -14,7 +14,7 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
-from .base import VideoSource
+from .base import DeviceError, VideoSource
 
 Listener = Callable[[float, np.ndarray], None]
 
@@ -39,9 +39,11 @@ class FrameHub(VideoSource):
             self.source.flush = 0                   # 연속으로 읽으므로 버퍼 비우기 불필요
         self.source.open()
         self._stop.clear()
+        self._latest, self._latest_t = None, 0.0
         self._thread = threading.Thread(target=self._loop, name="FrameHub", daemon=True)
         self._thread.start()
-        self.read(timeout=3.0)                      # 첫 프레임 확보
+        if self.read(timeout=3.0) is None:          # 첫 프레임 확보
+            raise DeviceError("FrameHub: 첫 영상 프레임이 들어오지 않음")
 
     def read(self, timeout: float = 1.0) -> Optional[np.ndarray]:
         """호출 시각 이후에 '캡처를 시작한' 프레임을 기다려 반환. 시간 초과 시 마지막 프레임.
@@ -49,8 +51,10 @@ class FrameHub(VideoSource):
          시뮬레이터에서 커서 실측이 흔들기 크기 8px 만큼 틀리는 간헐 오류로 확인)"""
         t_call = time.monotonic()
         with self._cond:
-            self._cond.wait_for(lambda: self._latest_t >= t_call or self._stop.is_set(), timeout)
-            return None if self._latest is None else self._latest.copy()
+            fresh = self._cond.wait_for(lambda: self._latest_t >= t_call or self._stop.is_set(), timeout)
+            if not fresh or self._latest is None:
+                return None                         # 새 프레임이 안 옴 = 영상 끊김 (오래된 화면을 돌려주지 않음)
+            return self._latest.copy()
 
     def close(self) -> None:
         self._stop.set()

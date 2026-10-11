@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from ..hal.base import HidOutput, VideoSource
+from ..hal.base import DeviceError, HidOutput, VideoSource
 from ..hal.relayboard import key_packet, mouse_packet
 from .app import DemoEquipmentApp
 
@@ -37,10 +37,23 @@ class SimWorld:
         self.noise = noise
         self.desktop_icon = desktop_icon
         self.signal = True              # False: 영상 끊김(검은 화면) 재현
+        # 장애 주입 (운영 자동 복구 시험): hid_fail/video_fail 이면 통신 오류. 장치를 다시 열면 해소
+        # (stubborn > 0 이면 그 횟수만큼 다시 열어도 해소되지 않음)
+        self.hid_fail = False
+        self.video_fail = False
+        self.stubborn = 0
+        self.opens = 0
         self.rng = np.random.default_rng(seed)
         self.cx, self.cy = self.w / 2, self.h / 2   # 커서(화면 좌표)
         self.buttons = 0
         self.packets: List[bytes] = []               # 실장비와 동일한 패킷 기록(검증용)
+
+    def _reopen(self) -> None:
+        self.opens += 1
+        if self.stubborn > 0 and (self.hid_fail or self.video_fail):
+            self.stubborn -= 1
+            raise DeviceError("Sim: 장치가 아직 복구되지 않음 (주입)")
+        self.hid_fail = self.video_fail = False
 
     def cursor_frame_pos(self) -> Tuple[int, int]:
         return (int(self.cx) + self.offset[0], int(self.cy) + self.offset[1])
@@ -89,9 +102,11 @@ class SimVideo(VideoSource):
         self.world = world
 
     def open(self) -> None:
-        pass
+        self.world._reopen()
 
     def read(self) -> Optional[np.ndarray]:
+        if self.world.video_fail:
+            return None
         return self.world.render()
 
     def close(self) -> None:
@@ -115,11 +130,15 @@ class SimHid(HidOutput):
         pass
 
     def mouse_move(self, dx: int, dy: int, buttons: int = 0) -> None:
+        if self.world.hid_fail:
+            raise DeviceError("SimHid: 통신 오류 (주입)")
         dx = max(-127, min(127, dx))
         dy = max(-127, min(127, dy))
         self.world.packets.append(mouse_packet(dx, dy, buttons))
         self.world.move(dx, dy, buttons)
 
     def key(self, vk: int, scan: int, extended: bool, up: bool, modifiers: int = 0) -> None:
+        if self.world.hid_fail:
+            raise DeviceError("SimHid: 통신 오류 (주입)")
         self.world.packets.append(key_packet(vk, scan, extended, up, modifiers))
         self.world.app.key(vk, scan, extended, up, modifiers)

@@ -169,6 +169,16 @@ class Notifier:
         if self.webhook:
             threading.Thread(target=self._post, args=(payload,), daemon=True).start()
 
+    def send(self, severity: str, text: str, **extra) -> None:
+        """감시 이벤트가 아닌 알림 (운영 실행기: 작업 실패, 장치 재연결, 운영 정지)."""
+        self.log(f"  [알림:{severity}] {text}")
+        if SEVERITY.get(severity, 1) < self.min_sev:
+            return
+        payload = {"source": "GHOST", "severity": severity, "text": f"[GHOST] {text}", "t": round(time.time(), 3), **extra}
+        self.sent.append(payload)
+        if self.webhook:
+            threading.Thread(target=self._post, args=(payload,), daemon=True).start()
+
     def _post(self, payload: dict) -> None:
         try:
             req = urllib.request.Request(self.webhook, data=json.dumps(payload).encode("utf-8"),

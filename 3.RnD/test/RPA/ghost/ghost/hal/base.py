@@ -18,6 +18,10 @@ import numpy as np
 LEFT, RIGHT, MIDDLE = 1, 2, 4
 
 
+class DeviceError(RuntimeError):
+    """장치(캡처·입력) 통신 오류. 운영 실행기는 이 오류를 '장치 오류'로 분류해 재연결을 시도한다."""
+
+
 class VideoSource(ABC):
     @abstractmethod
     def open(self) -> None: ...

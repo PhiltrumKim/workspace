@@ -4,10 +4,11 @@
   "description": "demo_run_recipe + 감시: 실행 중 알람 팝업이 뜨면 ack_alarm 으로 확인 후 작업 계속",
   "watch": "watch_alarm.json",
   "steps": [
-    { "action": "click", "target": "nav_recipe" },
+    { "action": "click", "target": "nav_recipe", "expect": { "gone": "start_btn", "timeout": 2 }, "retry": 2 },
     { "action": "click", "target": "rcp_b", "expect": { "visible": "rcp_b_sel", "timeout": 2 }, "retry": 2 },
     { "action": "click", "target": "nav_run", "expect": { "visible": "start_btn", "timeout": 2 }, "retry": 1 },
     { "action": "click", "target": "lot_label" },
+    { "action": "repeat", "times": 30, "label": "입력칸 비우기", "steps": [ { "action": "key", "key": "backspace" } ] },
     { "action": "type", "text": "LOT-2026A_02" },
     { "action": "key", "key": "enter" },
     { "action": "click", "target": "start_btn", "expect": { "visible": "status_running", "timeout": 3 }, "retry": 1 },

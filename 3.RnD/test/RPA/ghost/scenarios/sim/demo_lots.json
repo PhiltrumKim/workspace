@@ -1,14 +1,14 @@
 {
   "ghost": 1,
   "name": "demo_lots",
-  "description": "LOT 목록 일괄 처리: 레시피 미선택 시에만 선택 → LOT 마다 입력·시작·완료 대기·입력값 확인 → 처리 건수 확인 (알람은 감시가 처리)",
+  "description": "LOT 목록 일괄 처리: 레시피 미선택 시에만 선택 → LOT 마다 입력·입력값 확인·시작·완료 대기 → 처리 건수 확인 (알람은 감시가 처리)",
   "params": {
     "lots": { "default": "LOT-A1,LOT-B2,LOT-C3", "description": "처리할 LOT 목록 (쉼표로 구분)" },
     "recipe": { "default": "rcp_b", "description": "레시피 대상 이름 (rcp_a, rcp_b, rcp_c)" }
   },
   "watch": "watch_alarm.json",
   "steps": [
-    { "action": "click", "target": "nav_recipe", "label": "레시피 화면" },
+    { "action": "click", "target": "nav_recipe", "label": "레시피 화면", "expect": { "gone": "start_btn", "timeout": 2 }, "retry": 2 },
     { "action": "if", "cond": { "gone": "${recipe}_sel" }, "label": "레시피가 선택 안 돼 있으면",
       "then": [
         { "action": "click", "target": "${recipe}", "expect": { "visible": "${recipe}_sel", "timeout": 2 }, "retry": 1 }
@@ -18,14 +18,14 @@
     { "action": "for_each", "items": "${lots}", "var": "lot", "label": "LOT 마다",
       "steps": [
         { "action": "click", "target": "lot_label", "label": "LOT 입력칸" },
-        { "action": "repeat", "times": 20, "label": "입력칸 비우기", "steps": [ { "action": "key", "key": "backspace" } ] },
+        { "action": "repeat", "times": 30, "label": "입력칸 비우기", "steps": [ { "action": "key", "key": "backspace" } ] },
         { "action": "type", "text": "${lot}" },
         { "action": "key", "key": "enter" },
+        { "action": "read", "name": "lot_read", "region": [502, 182, 412, 72], "label": "입력된 LOT 확인 (START 전에)" },
+        { "action": "if", "cond": { "expr": "lot_read != lot" },
+          "then": [ { "action": "fail", "message": "LOT 입력 불일치: 화면 ${lot_read} / 기대 ${lot} — START 하지 않음" } ] },
         { "action": "click", "target": "start_btn", "expect": { "visible": "status_running", "timeout": 3 }, "retry": 1 },
         { "action": "wait_for", "target": "status_done", "timeout": 15 },
-        { "action": "read", "name": "lot_read", "region": [502, 182, 412, 72], "label": "입력된 LOT 확인" },
-        { "action": "if", "cond": { "expr": "lot_read != lot" },
-          "then": [ { "action": "fail", "message": "LOT 입력 불일치: 화면 ${lot_read} / 기대 ${lot}" } ] },
         { "action": "set", "name": "done", "expr": "done + 1" }
       ] },
     { "action": "if", "cond": { "expr": "done != lot_index" },

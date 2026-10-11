@@ -43,6 +43,8 @@ class RunResult:
     stopped: bool = False
     aborted_by: str = ""                       # 감시 규칙에 의해 중단된 경우 규칙 이름
     values: dict = field(default_factory=dict) # read 액션으로 읽은 값
+    error: str = ""                            # 스텝 밖 오류 (장치 오류 등)
+    device_error: bool = False                 # 장치(캡처·입력) 통신 오류로 끝났는지 — 운영 실행기의 복구 판단
     watch_events: List[dict] = field(default_factory=list)
 
 
@@ -318,9 +320,10 @@ class Runner:
             self.log("✖ 반복문 밖에서 break/continue")
             res.ok = False
         except Exception as e:                  # 장비 오류 등: 기록하고 안전하게 종료
-            self.log(f"✖ 실행 중단: {e!r}")
-            self.bb.event("error", error=repr(e))
-            res.ok = False
+            from ..hal.base import DeviceError
+            res.ok, res.error, res.device_error = False, str(e) or repr(e), isinstance(e, DeviceError)
+            self.log(f"✖ 실행 중단{' (장치 오류)' if res.device_error else ''}: {e!r}")
+            self.bb.event("error", error=repr(e), device_error=res.device_error)
         finally:
             try:
                 self.dev.release_all_keys()

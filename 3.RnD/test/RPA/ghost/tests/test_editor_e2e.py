@@ -52,7 +52,7 @@ def test_full_authoring_flow(page_and_app):
     # 1) 기존 시나리오 불러오기 → 스텝 목록
     page.select_option("#scen-select", "demo_run_recipe")
     page.wait_for_selector("#steps li.step")
-    assert page.locator("#steps li.step").count() == 9
+    assert page.locator("#steps li.step").count() == 11      # 10 스텝 + 반복 안의 1
 
     # 2) 첫 스텝만 실행 → 결과 표시
     page.locator("#steps li.step").nth(0).locator("button[title='이 스텝만 실행']").click()
@@ -164,3 +164,41 @@ def test_nested_flow_and_params(page_and_app):
     assert saved["steps"][0]["cond"] == {"expr": "n > 3"}
     assert saved["steps"][0]["then"] == [{"action": "set", "name": "big", "value": "yes ${n}"}]
     assert errors == [], errors
+
+
+def test_ops_tab(page_and_app):
+    page, app, w, errors, tmp = page_and_app
+    page.click(".tabs button[data-tab=ops]")
+    page.wait_for_function("document.querySelector('#ops-scen').options.length > 0")
+    page.select_option("#ops-scen", "demo_lots")
+    page.wait_for_selector("#ops-params [data-param=lots]")
+    page.fill("#ops-params [data-param=lots]", "LA,LB")
+    page.fill("#ops-count", "2")
+    page.click("#ops-submit")
+    page.wait_for_function("document.querySelector('#ops-msg').textContent.includes('작업 1, 2')")
+    page.wait_for_selector("#ops-jobs .job.queued")
+    page.click("#ops-jobs .job.queued >> nth=0 >> button:has-text('취소')")   # 최신(2번) 취소
+    page.wait_for_selector("#ops-jobs .job.cancelled")
+    page.click("#ops-start")
+    page.wait_for_selector("#ops-jobs .job.ok", timeout=60000)
+    assert "운영 중" in page.text_content("#ops-badge")
+    assert "lot_read=LB" in page.text_content("#ops-jobs .job.ok")
+    # 예약: 매일 + 요일
+    page.click("#ops-sched-box summary")
+    page.fill("#sc-name", "아침 점검")
+    page.select_option("#sc-scen", "demo_run_recipe")
+    page.click("[data-skind=daily]")
+    page.fill("#sc-times", "25:00")
+    page.click("#sc-save")
+    page.wait_for_function("document.querySelector('#sc-msg').textContent.includes('시각 형식')")
+    page.fill("#sc-times", "08:00, 20:30")
+    page.check("#sc-days label:nth-child(1) input")
+    page.click("#sc-save")
+    page.wait_for_selector("#ops-scheds .sched")
+    assert "월 08:00, 20:30" in page.text_content("#ops-scheds .sched")
+    page.wait_for_function("document.querySelector('#rep-table').textContent.includes('demo_lots')")
+    page.click("#ops-pause")
+    page.wait_for_function("document.querySelector('#ops-badge').textContent.includes('일시정지')")
+    shot = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runs", "_work", "ops_tab.png")
+    page.screenshot(path=shot)
+    assert not errors, errors

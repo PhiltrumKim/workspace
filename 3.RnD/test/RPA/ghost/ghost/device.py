@@ -23,13 +23,9 @@ import cv2
 import numpy as np
 
 from .hal import keymap
-from .hal.base import LEFT, HidOutput, VideoSource
+from .hal.base import LEFT, DeviceError, HidOutput, VideoSource  # noqa: F401  (DeviceError 재노출)
 
 Point = Tuple[int, int]
-
-
-class DeviceError(RuntimeError):
-    pass
 
 
 class Device:
@@ -66,6 +62,31 @@ class Device:
             self.video.close()
         finally:
             self.hid.close()
+
+    def reconnect(self, home: bool = True) -> None:
+        """장치를 닫고 다시 연다 (영상 끊김·시리얼 오류 복구). 실패하면 DeviceError."""
+        self.log("[device] 장치 재연결 시도")
+        for close in (self.video.close, self.hid.close):
+            try:
+                close()
+            except Exception:
+                pass
+        self._mods = 0
+        time.sleep(0.5)
+        try:
+            self.hid.open()
+            self.video.open()
+        except DeviceError:
+            raise
+        except Exception as e:
+            raise DeviceError(f"장치 재연결 실패: {e!r}")
+        self.frame()                                # 영상이 실제로 들어오는지 확인
+        self._mods = sum(keymap.MODIFIER_BITS.values())   # 끊길 때 눌려 있던 수식키가 대상 PC 에 남았을 수 있음 → 모두 해제
+        self.release_all_keys()
+        if home:
+            self.home()
+        self.stats["reconnects"] = self.stats.get("reconnects", 0) + 1
+        self.log("[device] 장치 재연결 완료")
 
     # ------------------------------------------------------------ 영상
     def frame(self) -> np.ndarray:

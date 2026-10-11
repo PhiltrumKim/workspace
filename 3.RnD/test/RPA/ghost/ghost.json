@@ -13,7 +13,8 @@
   "sim": {
     "paths": {
       "objects": "assets/sim_objects",
-      "scenarios": "scenarios/sim"
+      "scenarios": "scenarios/sim",
+      "data": "data/sim"
     },
     "cursor": {
       "home_expect": [

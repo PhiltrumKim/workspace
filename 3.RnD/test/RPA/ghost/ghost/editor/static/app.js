@@ -266,8 +266,10 @@ async function pollState() {
     S.state = await api("GET", "/api/state");
     $("#conn").textContent = S.state.mode === "sim" ? "시뮬레이터" : `실장비 · ${S.state.port} · ${S.state.width}×${S.state.height}`;
     const st = $("#status");
-    st.className = "status" + (S.state.running ? " running" : S.state.busy ? " busy" : "");
-    $("#status-text").textContent = S.state.running ? "시나리오 실행 중" : S.state.busy ? "조작 중" : "대기";
+    const opJob = S.state.ops_job;
+    st.className = "status" + (S.state.running || opJob ? " running" : S.state.busy ? " busy" : "");
+    $("#status-text").textContent = S.state.running ? "시나리오 실행 중" : opJob ? `운영 작업 #${opJob} 실행 중`
+      : S.state.busy ? "조작 중" : S.state.ops === "halted" ? "운영 장치 정지" : S.state.ops === "running" ? "운영 중 · 대기" : "대기";
   } catch { $("#conn").textContent = "서버 연결 끊김"; }
   setTimeout(pollState, 1500);
 }
@@ -277,6 +279,7 @@ $$(".tabs button").forEach((b) => b.addEventListener("click", () => {
   $$(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
   $$(".tab").forEach((t) => { t.hidden = t.id !== `tab-${b.dataset.tab}`; });
   if (b.dataset.tab === "runs") loadRuns();
+  if (b.dataset.tab === "ops") opsOpen();
 }));
 
 // ---------------------------------------------------------------- 대상(target)
@@ -918,6 +921,179 @@ async function showRun(dir) {
 }
 $("#runs-refresh").addEventListener("click", loadRuns);
 
+// ---------------------------------------------------------------- 운영 (대기열·예약·보고서)
+const OPS_STATE = { running: ["운영 중", "go"], paused: ["일시정지", "warn"], stopped: ["정지됨", ""], halted: ["장치 정지", "bad"] };
+const JOB_ST = { queued: "대기", running: "실행 중", ok: "성공", failed: "실패", error: "장치 오류", stopped: "중지",
+                 cancelled: "취소", interrupted: "중단" };
+const DAY_NAMES = "월화수목금토일";
+const O = { timer: null, scen: [], params: {}, skind: "interval", editId: null };
+const fmtT = (t) => { if (!t) return "-"; const d = new Date(t * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`; };
+
+async function opsOpen() {
+  O.scen = (await api("GET", "/api/scenarios")).filter((s) => s.kind === "scenario").map((s) => s.name);
+  for (const sel of [$("#ops-scen"), $("#sc-scen")]) {
+    const cur = sel.value;
+    sel.replaceChildren(...O.scen.map((n) => h("option", { value: n }, n)));
+    if (O.scen.includes(cur)) sel.value = cur;
+  }
+  if (!$("#sc-days").children.length)
+    $("#sc-days").append(...[...DAY_NAMES].map((d, i) => h("label", { class: "day" }, h("input", { type: "checkbox", value: i }), d)));
+  await opsParams("#ops-scen", "#ops-params");
+  await opsParams("#sc-scen", "#sc-params");
+  O.counts = null;
+  opsRefresh();
+}
+
+async function opsParams(selId, boxId, values = {}) {
+  const name = $(selId).value, box = $(boxId);
+  box.replaceChildren();
+  if (!name) return;
+  const sc = await api("GET", `/api/scenarios/${encodeURIComponent(name)}`);
+  for (const [k, p] of Object.entries(sc.params || {})) {
+    const spec = typeof p === "object" && p !== null ? p : { default: p };
+    box.append(h("label", { title: spec.description || "" }, `${k}${spec.description ? " — " + spec.description : ""}`,
+      h("input", { "data-param": k, value: values[k] ?? spec.default ?? "", placeholder: spec.default === undefined ? "필수" : "" })));
+  }
+}
+const paramValues = (boxId) => Object.fromEntries($$(`${boxId} [data-param]`).map((i) => [i.dataset.param, i.value]));
+
+async function opsRefresh() {
+  clearTimeout(O.timer);
+  if ($("#tab-ops").hidden) return;
+  try {
+    const [st, jobs, scheds, evs] = await Promise.all([api("GET", "/api/ops/status"),
+      api("GET", `/api/ops/jobs?limit=60&status=${$("#ops-filter").value}`), api("GET", "/api/ops/schedules"),
+      api("GET", "/api/ops/events?limit=30")]);
+    renderOpsState(st); renderJobs(jobs); renderScheds(scheds);
+    const ck = JSON.stringify(st.counts);
+    if (ck !== O.counts) { O.counts = ck; setRepLinks(); }      // 작업이 끝나면 보고서 요약도 갱신
+    $("#ops-events").replaceChildren(...evs.map((e) => h("li", {}, h("span", { class: "mono" }, fmtT(e.t)), ` ${e.kind} `, h("span", { class: "hint" }, e.detail || ""))));
+  } catch (e) { msg($("#ops-msg"), e.message, "bad"); }
+  clearTimeout(O.timer);
+  O.timer = setTimeout(opsRefresh, 2000);             // 탭이 열려 있는 동안 2초마다 갱신
+}
+
+function renderOpsState(st) {
+  const [label, cls] = OPS_STATE[st.state] || [st.state, ""];
+  const b = $("#ops-badge"); b.textContent = label; b.className = `opbadge ${cls}`;
+  $("#ops-halt").hidden = !st.halt_reason; $("#ops-halt").textContent = st.halt_reason || "";
+  $("#ops-current").textContent = st.current
+    ? `실행 중: 작업 ${st.current.id} · ${st.current.scenario} · ${st.current.elapsed}s · ${st.current.attempts}회째 (${st.current.source})`
+    : "진행 중인 작업 없음";
+  const c = st.counts || {};
+  $("#ops-counts").replaceChildren(...["queued", "ok", "failed", "error"].map((k) =>
+    h("span", { class: `cnt ${k}` }, h("b", {}, c[k] || 0), JOB_ST[k])),
+    h("span", { class: "cnt" }, h("b", {}, st.device?.reconnects || 0), "재연결"));
+  $("#ops-mem").textContent = st.memory_mb ? `메모리 ${st.memory_mb} MB` : "";
+  $("#ops-start").hidden = st.state !== "stopped";
+  $("#ops-pause").hidden = st.state !== "running";
+  $("#ops-resume").hidden = !["paused", "halted"].includes(st.state);
+  $("#ops-stop").hidden = st.state === "stopped";
+  $("#ops-stop-cur").hidden = !st.current;
+}
+
+function renderJobs(jobs) {
+  const ul = $("#ops-jobs");
+  ul.replaceChildren(...jobs.map((j) => {
+    const vals = j.vals && typeof j.vals === "object" ? Object.entries(j.vals).map(([k, v]) => `${k}=${v}`).join(" ") : "";
+    const params = j.params && Object.keys(j.params).length ? JSON.stringify(j.params) : "";
+    return h("li", { class: `job ${j.status}` },
+      h("span", { class: `st ${j.status}` }, JOB_ST[j.status] || j.status),
+      h("div", { class: "body" },
+        h("div", {}, h("b", {}, `#${j.id} ${j.scenario}`), params ? h("span", { class: "hint" }, ` ${params}`) : null),
+        h("div", { class: "hint" }, `${fmtT(j.started || j.created)} · ${j.source || ""}${j.duration != null ? ` · ${j.duration}s` : ""}${j.attempts > 1 ? ` · ${j.attempts}회째` : ""}`),
+        vals ? h("div", { class: "vals" }, vals) : null,
+        j.error && j.status !== "ok" ? h("div", { class: "err" }, j.error) : null),
+      h("div", { class: "tools" },
+        j.status === "queued" ? h("button", { class: "ghost", title: "취소", onclick: async () => { await api("DELETE", `/api/ops/jobs/${j.id}`); opsRefresh(); } }, "취소") : null,
+        j.run_dir ? h("button", { class: "ghost", title: "실행 기록 보기", onclick: () => { $$(".tabs button").find((b) => b.dataset.tab === "runs").click(); showRun(j.run_dir); } }, "기록") : null));
+  }));
+  if (!jobs.length) ul.append(h("li", { class: "hint" }, "작업이 없습니다."));
+}
+
+function renderScheds(list) {
+  $("#ops-sched-count").textContent = list.length ? `${list.filter((s) => s.enabled).length}/${list.length}개 켜짐` : "";
+  $("#ops-scheds").replaceChildren(...list.map((s) => h("li", { class: `sched ${s.enabled ? "" : "off"}` },
+    h("label", { class: "inl", title: "켜기/끄기" }, h("input", { type: "checkbox", checked: !!s.enabled,
+      onchange: async (e) => { await api("PUT", `/api/ops/schedules/${s.id}`, { enabled: e.target.checked }); opsRefresh(); } })),
+    h("div", { class: "body" }, h("b", {}, s.name), h("span", { class: "hint" }, ` ${s.scenario} · ${s.describe}`),
+      h("div", { class: "hint" }, s.enabled ? `다음: ${fmtT(s.next_run)} · 마지막: ${fmtT(s.last_run)}` : "꺼짐")),
+    h("div", { class: "tools" },
+      h("button", { class: "ghost", onclick: () => editSched(s) }, "수정"),
+      h("button", { class: "ghost", onclick: async () => { if (confirm(`예약 '${s.name}'을 삭제할까요?`)) { await api("DELETE", `/api/ops/schedules/${s.id}`); opsRefresh(); } } }, "삭제")))));
+}
+
+function setSkind(k) {
+  O.skind = k;
+  $$("[data-skind]").forEach((b) => b.classList.toggle("on", b.dataset.skind === k));
+  $("#sc-every-l").hidden = k !== "interval"; $("#sc-daily").hidden = k !== "daily";
+}
+async function editSched(s) {
+  O.editId = s?.id ?? null;
+  $("#sc-name").value = s?.name || "";
+  if (s) $("#sc-scen").value = s.scenario;
+  setSkind(s?.kind || "interval");
+  $("#sc-every").value = s?.every_min || 60;
+  $("#sc-times").value = (s?.times || []).join(", ");
+  $$("#sc-days input").forEach((i) => { i.checked = (s?.days || []).includes(+i.value); });
+  await opsParams("#sc-scen", "#sc-params", s?.params || {});
+  $("#sc-save").textContent = s ? "예약 저장" : "예약 추가";
+  $("#sc-reset").hidden = !s;
+  $("#ops-sched-box").open = true;
+  msg($("#sc-msg"), "");
+}
+
+function setRepLinks() {
+  const d = $("#rep-days").value;
+  $("#rep-html").href = `/api/ops/report.html?days=${d}`;
+  $("#rep-csv").href = `/api/ops/jobs.csv?days=${d}`;
+  api("GET", `/api/ops/report?days=${d}`).then((r) => {
+    const rows = r.scenarios.map((s) => h("tr", {}, h("td", {}, s.scenario), h("td", { class: "num" }, s.runs),
+      h("td", { class: "num" }, `${s.success_rate}%`), h("td", { class: "num" }, s.duration ? `${s.duration.mean}s` : "-")));
+    $("#rep-table").replaceChildren(h("tr", {}, h("th", {}, "시나리오"), h("th", {}, "실행"), h("th", {}, "성공률"), h("th", {}, "평균")),
+      ...rows, h("tr", {}, h("td", { class: "hint" }, `합계 (재연결 ${r.events.reconnect_ok || 0})`), h("td", { class: "num" }, r.total),
+        h("td", { class: "num" }, `${r.success_rate}%`), h("td", {}, "")));
+  }).catch(() => {});
+}
+
+async function opsControl(action) {
+  try { renderOpsState(await api("POST", "/api/ops/control", { action })); opsRefresh(); }
+  catch (e) { msg($("#ops-msg"), e.message, "bad"); }
+}
+$("#ops-start").addEventListener("click", () => opsControl("start"));
+$("#ops-pause").addEventListener("click", () => opsControl("pause"));
+$("#ops-resume").addEventListener("click", () => opsControl("resume"));
+$("#ops-stop").addEventListener("click", () => { if (confirm("운영을 중지할까요? 진행 중 작업도 중지됩니다.")) opsControl("stop"); });
+$("#ops-stop-cur").addEventListener("click", () => opsControl("stop_current"));
+$("#ops-scen").addEventListener("change", () => opsParams("#ops-scen", "#ops-params"));
+$("#sc-scen").addEventListener("change", () => opsParams("#sc-scen", "#sc-params"));
+$("#ops-filter").addEventListener("change", () => opsRefresh());
+$("#rep-days").addEventListener("change", setRepLinks);
+$$("[data-skind]").forEach((b) => b.addEventListener("click", () => setSkind(b.dataset.skind)));
+$("#sc-reset").addEventListener("click", () => editSched(null));
+$("#ops-submit").addEventListener("click", async () => {
+  try {
+    const r = await api("POST", "/api/ops/jobs", { scenario: $("#ops-scen").value, params: paramValues("#ops-params"),
+                                                  count: +$("#ops-count").value || 1 });
+    msg($("#ops-msg"), `대기열에 추가: 작업 ${r.ids.join(", ")}`, "ok");
+    opsRefresh();
+  } catch (e) { msg($("#ops-msg"), e.message, "bad"); }
+});
+$("#sched-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { name: $("#sc-name").value.trim(), scenario: $("#sc-scen").value, kind: O.skind,
+                 every_min: +$("#sc-every").value, params: paramValues("#sc-params"),
+                 times: $("#sc-times").value.split(/[,\s]+/).filter(Boolean),
+                 days: $$("#sc-days input").filter((i) => i.checked).map((i) => +i.value) };
+  try {
+    await api(O.editId ? "PUT" : "POST", O.editId ? `/api/ops/schedules/${O.editId}` : "/api/ops/schedules", body);
+    msg($("#sc-msg"), O.editId ? "저장했습니다." : "예약을 추가했습니다.", "ok");
+    if (!O.editId) $("#sc-name").value = "";
+    opsRefresh();
+  } catch (err) { msg($("#sc-msg"), err.message, "bad"); }
+});
+
 // ---------------------------------------------------------------- 직접 조작 막대
 $("#ctl-type").addEventListener("click", () => { const t = $("#ctl-text").value; if (t) control({ kind: "type", text: t }); });
 $("#ctl-key-btn").addEventListener("click", () => {
@@ -942,4 +1118,5 @@ window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault
   setScenario({ name: "", description: "", steps: [] });
   loadFrame();
   pollLogs();
+  if (location.hash === "#ops") $$(".tabs button").find((b) => b.dataset.tab === "ops").click();
 })();

@@ -17,7 +17,7 @@ from __future__ import annotations
 import struct
 import time
 
-from .base import HidOutput
+from .base import DeviceError, HidOutput
 
 CMD_MOUSE_SYNC = 0xE0
 CMD_SW_INIT = 0xE1
@@ -79,20 +79,30 @@ class RelayBoard(HidOutput):
 
     def open(self) -> None:
         import serial  # 장비 없는 환경(시뮬레이터/테스트)에서 pyserial 없이도 import 가능하도록 지연 import
-        self.ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=0.1)
+        try:
+            self.ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=0.1, write_timeout=1.0)
+        except (serial.SerialException, OSError) as e:
+            raise DeviceError(f"RelayBoard {self.port} 열기 실패: {e}")
         self._log(f"[relay] {self.port} open")
         self.send(mode_packet(remote=True))
         time.sleep(0.3)
 
     def close(self) -> None:
         if self.ser and self.ser.is_open:
-            self.ser.close()
+            try:
+                self.ser.close()
+            except Exception:
+                pass
             self._log("[relay] closed")
+        self.ser = None
 
     def send(self, pkt: bytes) -> None:
         if not self.ser or not self.ser.is_open:
-            raise RuntimeError("RelayBoard not open")
-        self.ser.write(pkt)
+            raise DeviceError("RelayBoard 가 열려 있지 않음")
+        try:
+            self.ser.write(pkt)
+        except Exception as e:                     # USB 분리, 쓰기 시간 초과 등
+            raise DeviceError(f"RelayBoard 통신 오류: {e}")
         time.sleep(self.tx_gap)
 
     def set_remote(self, remote: bool = True) -> None:
