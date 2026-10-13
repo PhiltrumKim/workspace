@@ -56,9 +56,24 @@ KEYS.update({
     ",": Key(0xBC, 0x33), ".": Key(0xBE, 0x34), "/": Key(0xBF, 0x35),
 })
 
+# 숫자 패드 (NumLock 켜짐 기준 VK. 꺼져 있으면 대상 Windows 가 방향키 등으로 바꿔 받는다)
+_NUM_SCAN = [0x52, 0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47, 0x48, 0x49]
+for _i, _sc in enumerate(_NUM_SCAN):
+    KEYS[f"num{_i}"] = Key(0x60 + _i, _sc)
+KEYS.update({
+    "num*": Key(0x6A, 0x37), "num+": Key(0x6B, 0x4E), "num-": Key(0x6D, 0x4A), "num.": Key(0x6E, 0x53),
+    "num/": Key(0x6F, 0x35, True), "numenter": Key(0x0D, 0x1C, True),
+    "numlock": Key(0x90, 0x45, True), "scrolllock": Key(0x91, 0x46), "printscreen": Key(0x2C, 0x37, True),
+    "rwin": Key(0x5C, 0x5C, True),
+    # 한국어 키보드 (Windows 가 받는 값: 한/영 VK_HANGUL, 한자 VK_HANJA). 실장비 시험으로 확인 필요
+    "hangul": Key(0x15, 0x72), "hanja": Key(0x19, 0x71),
+})
+
 ALIASES = {
     "escape": "esc", "return": "enter", "del": "delete", "ins": "insert", "pgup": "pageup", "pgdn": "pagedown",
     "control": "ctrl", "lctrl": "ctrl", "lshift": "shift", "lalt": "alt", "lwin": "win", "windows": "win",
+    "한영": "hangul", "한/영": "hangul", "한자": "hanja", "prtsc": "printscreen", "print": "printscreen",
+    "apps": "menu", "kp_enter": "numenter",
     " ": "space", "\n": "enter", "\t": "tab",
 }
 
