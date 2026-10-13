@@ -71,9 +71,12 @@ const ACTIONS = {
   break:       { label: "반복 빠져나가기", fields: ["label"] },
   continue:    { label: "다음 회차로 건너뛰기", fields: ["label"] },
   fail:        { label: "실패로 처리", fields: ["message", "label"] },
+  scroll:      { label: "휠 스크롤", fields: ["amount", "where", "label"] },
+  drag:        { label: "끌어다 놓기 (드래그)", fields: ["target", "to", "label"] },
+  scroll_to:   { label: "보일 때까지 스크롤", fields: ["target_only", "at", "direction", "label"] },
 };
 const ACTION_GROUPS = [
-  ["조작", ["click", "double", "right_click", "move", "type", "key", "hotkey"]],
+  ["조작", ["click", "double", "right_click", "move", "drag", "scroll", "scroll_to", "type", "key", "hotkey"]],
   ["대기·확인", ["wait", "wait_for", "wait_gone", "expect"]],
   ["읽기·기록", ["read", "screenshot"]],
   ["흐름 제어", ["if", "for_each", "repeat", "while", "set", "break", "continue", "fail", "call"]],
@@ -116,6 +119,9 @@ function summary(st) {
   if (a === "for_each") bits.push(`${st.var || "item"} ← ${Array.isArray(st.items) ? st.items.join(", ") : st.items}`);
   if (a === "while" && st.max) bits.push(`최대 ${st.max}회`);
   if (a === "fail" && st.message) bits.push(st.message);
+  if (a === "scroll") bits.push(`${st.amount > 0 ? "위로" : "아래로"} ${Math.abs(st.amount)}칸${st.target ? " @" + tname(st.target) : st.x !== undefined ? ` @(${st.x}, ${st.y})` : ""}`);
+  if (a === "drag") bits.push(`${st.target !== undefined ? tname(st.target) : `(${st.x}, ${st.y})`} → ${Array.isArray(st.to) ? `(${st.to.join(", ")})` : tname(st.to)}`);
+  if (a === "scroll_to") bits.push(`${tname(st.target)} 보일 때까지 ${st.direction === "up" ? "위로" : "아래로"}${Array.isArray(st.at) ? ` @(${st.at.join(", ")})` : st.at ? " @" + tname(st.at) : ""}`);
   if (st.timeout !== undefined && a !== "wait") bits.push(`최대 ${st.timeout}초`);
   if (st.expect) bits.push(`확인: ${tname(st.expect.visible ?? st.expect.gone)} ${"gone" in st.expect ? "사라짐" : "표시"}`);
   if (st.retry) bits.push(`재시도 ${st.retry}`);
@@ -606,6 +612,33 @@ function fieldTarget(st, allowXY) {
     h("div", { class: "inline" }, sel, h("button", { type: "button", onclick: () => { const v = sel.value; if (v && !v.startsWith("@") && !v.includes("${")) testLocate(v); } }, "찾기")), xy);
 }
 
+function fieldPlace(id, label, val, optional) {
+  const isXY = Array.isArray(val);
+  const sel = h("select", { id: `${id}-sel` }, optional ? h("option", { value: "" }, "— 지정 안 함 (현재 커서 위치) —") : null,
+    ...targetOptions(isXY ? undefined : val, true).filter((o) => o.value !== "" || !optional));
+  sf.place = sf.place || {};
+  sf.place[id] = val && typeof val === "object" && !isXY ? val : null;     // 글자 대상(인라인)은 그대로 보존
+  sel.value = isXY ? "@xy" : sf.place[id] ? "@inline" : (typeof val === "string" ? val : "");
+  const xy = h("div", { class: "inline", hidden: !isXY },
+    "x", numInput(`${id}-x`, isXY ? val[0] : undefined), "y", numInput(`${id}-y`, isXY ? val[1] : undefined),
+    h("button", { type: "button", onclick: async () => {
+      const p = await requestPick("point", `${label}: 화면에서 누르세요`);
+      if (p) { $(`#${id}-x`).value = p[0]; $(`#${id}-y`).value = p[1]; }
+    } }, "화면에서 찍기"));
+  sel.addEventListener("change", () => { xy.hidden = sel.value !== "@xy"; });
+  return h("div", { class: "fld" }, h("label", { for: `${id}-sel` }, label), sel, xy);
+}
+function readPlace(id) {
+  const v = $(`#${id}-sel`)?.value ?? "";
+  if (v === "@xy") {
+    const x = $(`#${id}-x`).value, y = $(`#${id}-y`).value;
+    if (x === "" || y === "") throw new Error("좌표를 지정하세요");
+    return [Number(x), Number(y)];
+  }
+  if (v === "@inline") return sf.place?.[id] || undefined;
+  return v || undefined;
+}
+
 function fieldExpect(st) {
   const e = st.expect || {};
   const kind = "gone" in e ? "gone" : "visible" in e ? "visible" : "";
@@ -690,6 +723,17 @@ function renderStepForm() {
     else if (f === "var") box.append(h("label", {}, `반복 변수 이름 (기본 ${VAR_DEFAULT[a]}${a === "for_each" ? ", 몇 번째인지는 이름_index" : ", 1부터"})`, textInput("f-var", st.var, { placeholder: VAR_DEFAULT[a] })));
     else if (f === "max") box.append(h("label", {}, "최대 반복 횟수 (무한 반복 방지)", numInput("f-maxiter", st.max ?? 100, { min: "1" })));
     else if (f === "message") box.append(h("label", {}, "실패 메시지 (${변수} 가능)", textInput("f-message", st.message)));
+    else if (f === "amount") box.append(h("label", {}, "휠 칸 수 (+ 위로, - 아래로. 한 칸 ≈ 3줄)", numInput("f-amount", st.amount ?? -3, { step: "1" })));
+    else if (f === "where") box.append(fieldPlace("f-where", "굴릴 위치 (목록·창 위)", st.target ?? (st.x !== undefined ? [st.x, st.y] : undefined), true));
+    else if (f === "to") box.append(fieldPlace("f-to", "놓을 곳", st.to, false));
+    else if (f === "at") box.append(fieldPlace("f-at", "굴릴 위치 (목록 위, 비우면 현재 커서 위치)", st.at, true));
+    else if (f === "direction") {
+      const sel = h("select", { id: "f-dir" }, h("option", { value: "down" }, "아래로"), h("option", { value: "up" }, "위로"));
+      sel.value = st.direction || "down";
+      box.append(h("div", { class: "fld" }, h("label", {}, "방향 · 한 번에 굴릴 칸 · 최대 횟수"),
+        h("div", { class: "inline" }, sel, numInput("f-step", st.step ?? 3, { min: "1", max: "20" }), "칸",
+          numInput("f-maxs", st.max ?? 15, { min: "1", max: "100" }), "번")));
+    }
   }
   $("#sf-json").value = JSON.stringify(st, null, 2);
   renderVarsHint();
@@ -762,6 +806,11 @@ function readStepForm() {
     else if (f === "var") { if (v("f-var")) st.var = v("f-var"); }
     else if (f === "max") st.max = num("f-maxiter") ?? 100;
     else if (f === "message") { if (v("f-message")) st.message = v("f-message"); }
+    else if (f === "amount") { st.amount = Math.trunc(num("f-amount") ?? 0); if (!st.amount) throw new Error("휠 칸 수를 입력하세요 (0 제외)"); }
+    else if (f === "where") { const w = readPlace("f-where"); if (Array.isArray(w)) { st.x = w[0]; st.y = w[1]; } else if (w) st.target = w; }
+    else if (f === "to") { const t = readPlace("f-to"); if (!t) throw new Error("놓을 곳을 지정하세요"); st.to = t; }
+    else if (f === "at") { const t = readPlace("f-at"); if (t) st.at = t; }
+    else if (f === "direction") { st.direction = v("f-dir"); st.step = num("f-step") ?? 3; st.max = num("f-maxs") ?? 15; }
   }
   for (const [k] of CHILD_KEYS[a] || []) st[k] = Array.isArray(sf.step[k]) ? sf.step[k] : [];   // 안쪽 스텝 유지
   return st;
@@ -1135,12 +1184,13 @@ window.addEventListener("beforeunload", (e) => { if (S.dirty) { e.preventDefault
 
 (async function init() {
   setTfKind("template");
+  setScenario({ name: "", description: "", steps: [] });   // 먼저: 불러오는 동안 사용자가 쓴 내용을 나중에 지우지 않도록
   await pollState();
   $("#key-list").append(...(S.state?.keys || []).map((k) => h("option", { value: k })));
   await loadTargets();
-  await loadScenarioList("");
-  setScenario({ name: "", description: "", steps: [] });
+  await loadScenarioList(S.scen.name || "");
   loadFrame();
   pollLogs();
   if (location.hash === "#ops") $$(".tabs button").find((b) => b.dataset.tab === "ops").click();
+  document.body.dataset.ready = "1";                        // 초기화 끝 (자동 시험이 기다리는 표시)
 })();

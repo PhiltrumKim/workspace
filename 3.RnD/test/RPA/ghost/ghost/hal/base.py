@@ -52,6 +52,10 @@ class HidOutput(ABC):
     def mouse_move(self, dx: int, dy: int, buttons: int = 0) -> None:
         """상대 이동 1회 + 버튼 상태(LEFT|RIGHT|MIDDLE 비트마스크)."""
 
+    def mouse_wheel(self, notch: int, buttons: int = 0) -> None:
+        """휠 한 칸 (+1 위, -1 아래)."""
+        raise NotImplementedError("이 장치는 휠을 지원하지 않음")
+
     @abstractmethod
     def key(self, vk: int, scan: int, extended: bool, up: bool, modifiers: int = 0) -> None:
         """키 1회 이벤트. vk=Windows Virtual-Key, scan=PS/2 Set1 make code."""

@@ -63,10 +63,17 @@ class SimWorld:
         self.cx = min(max(self.cx + dx * self.gain[0] * k, 0), self.w - 1)
         self.cy = min(max(self.cy + dy * self.gain[1] * k, 0), self.h - 1)
         pressed = buttons & ~self.buttons
+        released = self.buttons & ~buttons
         self.buttons = buttons
         for bit in (1, 2, 4):
             if pressed & bit:
                 self.app.click(int(self.cx), int(self.cy), bit)
+                self._press_at = (int(self.cx), int(self.cy))
+        if released & 1 and getattr(self, "_press_at", None) and hasattr(self.app, "drop"):
+            sx, sy = self._press_at
+            if abs(self.cx - sx) + abs(self.cy - sy) > 8:     # 끌어서 놓음
+                self.app.drop(sx, sy, int(self.cx), int(self.cy))
+            self._press_at = None
 
     def render(self) -> np.ndarray:
         if not self.signal:
@@ -139,6 +146,13 @@ class SimHid(HidOutput):
         dy = max(-127, min(127, dy))
         self.world.packets.append(mouse_packet(dx, dy, buttons))
         self.world.move(dx, dy, buttons)
+
+    def mouse_wheel(self, notch: int, buttons: int = 0) -> None:
+        if self.world.hid_fail:
+            raise DeviceError("SimHid: 통신 오류 (주입)")
+        self.world.packets.append(mouse_packet(0, 0, buttons, wheel=notch))
+        if hasattr(self.world.app, "wheel"):
+            self.world.app.wheel(int(self.world.cx), int(self.world.cy), 1 if notch > 0 else -1)
 
     def key(self, vk: int, scan: int, extended: bool, up: bool, modifiers: int = 0) -> None:
         if self.world.hid_fail:

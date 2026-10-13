@@ -23,7 +23,7 @@
     "file": "notepad_title.png",
     "w": 122,
     "h": 18,
-    "threshold": 0.85,
+    "threshold": 0.8,
     "hint": [
       352,
       230

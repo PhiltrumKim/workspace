@@ -29,6 +29,7 @@ def page_and_app(cfg, tmp_path):
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(f"http://127.0.0.1:{httpd.server_address[1]}/")
         page.wait_for_function("document.querySelector('#conn').textContent.includes('시뮬레이터')")
+        page.wait_for_selector("body[data-ready='1']", state="attached")      # 첫 화면 초기화 끝
         yield page, app, w, errors, tmp_path
         browser.close()
     httpd.shutdown()
@@ -222,4 +223,51 @@ def test_late_run_poll_does_not_overwrite(page_and_app):
     page.wait_for_function("document.querySelector('#scen-msg').textContent.includes('저장했습니다')")
     page.wait_for_timeout(4000)                          # 쌓여 있던 응답이 모두 도착할 시간
     assert "저장했습니다" in page.text_content("#scen-msg")
+    assert errors == [], errors
+
+
+def test_scroll_drag_steps_in_form(page_and_app):
+    """편집기 폼으로 휠·드래그·스크롤해서 찾기 스텝을 만들고 실행·저장."""
+    page, app, w, errors, tmp = page_and_app
+    page.click("#scen-new")
+    page.fill("#scen-name", "e2e_drag")
+    page.click("#step-add")
+    page.select_option("#sf-action", "click")
+    page.select_option("#f-target", "nav_log")
+    page.click("#sf-save")
+    page.wait_for_selector("#step-form", state="hidden")
+    page.click("#step-add")
+    page.select_option("#sf-action", "scroll")
+    page.fill("#f-amount", "-6")
+    page.select_option("#f-where-sel", "@xy")
+    page.fill("#f-where-x", "600")
+    page.fill("#f-where-y", "400")
+    page.click("#sf-save")
+    page.wait_for_selector("#step-form", state="hidden")
+    page.click("#step-add")
+    page.select_option("#sf-action", "drag")
+    page.select_option("#f-target", "@xy")
+    page.fill("#f-x", "600")
+    page.fill("#f-y", "170")
+    page.select_option("#f-to-sel", "@xy")
+    page.fill("#f-to-x", "1240")
+    page.fill("#f-to-y", "440")
+    page.click("#sf-save")
+    page.wait_for_selector("#step-form", state="hidden")
+    page.wait_for_function("document.querySelectorAll('#steps > li.step').length === 3")
+    assert "아래로 6칸" in page.text_content("#steps")
+    page.click("#scen-run")
+    try:
+        page.wait_for_function("/성공|실패/.test(document.querySelector('#scen-msg').textContent)", timeout=60000)
+    except Exception:
+        print("MSG", page.text_content("#scen-msg")); print("LOGS", [l["msg"] for l in app.logs()["lines"][-25:]]); print("RUN", app.run)
+        raise
+    assert "성공" in page.text_content("#scen-msg"), (page.text_content("#scen-msg"), app.logs()["lines"][-15:])
+    assert w.app.scroll == 18 and w.app.dropped == ["SAMPLE-19"]
+    page.click("#scen-save")
+    page.wait_for_function("document.querySelector('#scen-msg').textContent.includes('저장했습니다')")
+    with open(os.path.join(app.scen_dir, "e2e_drag.json"), encoding="utf-8") as f:
+        steps = json.load(f)["steps"]
+    assert steps[1] == {"action": "scroll", "amount": -6, "x": 600, "y": 400}
+    assert steps[2] == {"action": "drag", "x": 600, "y": 170, "to": [1240, 440]}
     assert errors == [], errors

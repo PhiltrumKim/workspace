@@ -1,0 +1,16 @@
+{
+  "ghost": 1,
+  "name": "gtb_close",
+  "description": "GTB-3000 종료 (제목줄에 초점 → Alt+F4 → 종료 확인 '예'). 열린 확인 창이 있으면 먼저 닫음",
+  "steps": [
+    { "action": "key", "key": "esc", "label": "열린 확인 창이 있으면 닫기" },
+    { "action": "if", "cond": { "visible": { "text": "GTB-3000 Analyzer" } }, "label": "GTB-3000 이 떠 있으면",
+      "then": [
+        { "action": "click", "target": { "text": "GTB-3000 Analyzer" }, "label": "제목줄에 초점" },
+        { "action": "hotkey", "keys": ["alt", "f4"] },
+        { "action": "wait", "sec": 1 },
+        { "action": "key", "key": "y", "label": "종료 확인 '예'" },
+        { "action": "wait_gone", "target": { "text": "GTB-3000 Analyzer" }, "timeout": 15 }
+      ] }
+  ]
+}

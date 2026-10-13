@@ -52,6 +52,8 @@ REQUIRED = {
     "key": ["key"], "hotkey": ["keys"], "type": ["text"],
     "wait": ["sec"], "wait_for": ["target"], "wait_gone": ["target"], "expect": ["target"],
     "screenshot": [], "call": ["scenario"], "home": [], "read": [],
+    # 휠·드래그
+    "scroll": ["amount"], "drag": ["to"], "scroll_to": ["target"],
     # 제어 구조
     "set": ["name"], "if": ["cond"], "repeat": ["times", "steps"], "for_each": ["items", "steps"],
     "while": ["cond", "steps"], "break": [], "continue": [], "fail": [],
@@ -180,8 +182,33 @@ def validate(sc: dict, registry=None) -> List[str]:
                     check_target(where, st["target"])
                 elif not ("x" in st and "y" in st):
                     errs.append(f"{where} {a}: target 또는 x,y 필요")
-            if a in ("wait_for", "wait_gone", "expect") and "target" in st:
+            if a in ("wait_for", "wait_gone", "expect", "scroll_to") and "target" in st:
                 check_target(where, st["target"])
+            if a == "scroll":
+                if "target" in st:
+                    check_target(where, st["target"])
+                if "amount" in st and not _templated(st["amount"]) and not isinstance(st["amount"], int):
+                    errs.append(f"{where} scroll: amount 는 정수 (+위로, -아래로 휠 칸 수)")
+            if a == "drag":
+                if "target" in st:
+                    check_target(where, st["target"])
+                elif not ("x" in st and "y" in st):
+                    errs.append(f"{where} drag: 시작점 target 또는 x,y 필요")
+                to = st.get("to")
+                if isinstance(to, list):
+                    if len(to) != 2:
+                        errs.append(f"{where} drag: to 는 target 이름 또는 [x, y]")
+                elif to is not None:
+                    check_target(where, to)
+            if a == "scroll_to":
+                at = st.get("at")
+                if isinstance(at, list):
+                    if len(at) != 2:
+                        errs.append(f"{where} scroll_to: at 은 target 이름 또는 [x, y]")
+                elif at is not None:
+                    check_target(where, at)
+                if st.get("direction", "down") not in ("down", "up"):
+                    errs.append(f"{where} scroll_to: direction 은 down 또는 up")
             if a == "read":
                 if "anchor" in st:
                     check_target(where, st["anchor"])
@@ -332,6 +359,15 @@ def describe(st: dict) -> str:
         return f"wait {st['sec']}s{lab}"
     if a in ("wait_for", "wait_gone", "expect"):
         return f"{a} {_t(st['target'])}{lab}"
+    if a == "scroll":
+        where = f" @{_t(st['target'])}" if "target" in st else f" @({st['x']},{st['y']})" if "x" in st else ""
+        return f"scroll {st['amount']}{where}{lab}"
+    if a == "drag":
+        src = _t(st["target"]) if "target" in st else f"({st.get('x')},{st.get('y')})"
+        to = st["to"]
+        return f"drag {src} → {tuple(to) if isinstance(to, list) else _t(to)}{lab}"
+    if a == "scroll_to":
+        return f"scroll_to {_t(st['target'])} ({st.get('direction', 'down')}){lab}"
     if a == "call":
         return f"call ▷ {st['scenario']}{lab}"
     if a == "read":

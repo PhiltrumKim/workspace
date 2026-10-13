@@ -37,6 +37,11 @@ LOT_LABEL: Box = (320, 140, 130, 60)
 LOT_FIELD: Box = (460, 140, 400, 60)
 START_BTN: Box = (320, 240, 200, 70)
 STATUS: Box = (320, 350, 360, 56)
+# LOG 화면: 시료 40개 중 10개만 보이는 목록(휠로 스크롤, 더블클릭=열기)과 드롭 상자(끌어다 놓기)
+SAMPLES = [f"SAMPLE-{i:02d}" for i in range(1, 41)]
+LIST_BOX: Box = (320, 100, 520, 600)
+LIST_ROW_H, LIST_VISIBLE = 60, 10
+DROP_BOX: Box = (1000, 300, 400, 200)
 ALARM: Box = (660, 390, 600, 300)
 ALARM_TITLE: Box = (660, 390, 600, 56)
 ALARM_OK: Box = (860, 600, 200, 60)
@@ -68,6 +73,9 @@ class DemoEquipmentApp:
         self.lot_focus = False
         self.run_state = "idle"
         self.run_t0 = 0.0
+        self.scroll = 0                      # LOG 목록 첫 줄 번호
+        self._last_click = (0.0, None)
+        self.dropped: List[str] = []
         self.alarm: Optional[str] = None
         self.shift = False
         self.events: List[str] = []
@@ -102,9 +110,36 @@ class DemoEquipmentApp:
             out["lot_field"] = LOT_FIELD
             out["start_btn"] = START_BTN
             out[f"status_{self.run_state}"] = STATUS
+        elif self.page == "log":
+            for i, name in enumerate(self.visible_samples()):
+                out[name] = (LIST_BOX[0], LIST_BOX[1] + i * LIST_ROW_H, LIST_BOX[2], LIST_ROW_H)
+            out["drop_box"] = DROP_BOX
         if self.alarm:
             out = {"alarm_title": ALARM_TITLE, "alarm_ok": ALARM_OK}
         return out
+
+    def visible_samples(self) -> List[str]:
+        return SAMPLES[self.scroll:self.scroll + LIST_VISIBLE]
+
+    def _sample_at(self, x: int, y: int) -> Optional[str]:
+        if self.page != "log" or not _inside(LIST_BOX, x, y):
+            return None
+        i = (y - LIST_BOX[1]) // LIST_ROW_H
+        vis = self.visible_samples()
+        return vis[i] if 0 <= i < len(vis) else None
+
+    def wheel(self, x: int, y: int, notch: int):
+        """휠 한 칸 = 3줄 (Windows 기본). +1 위로."""
+        if self.alarm or self.page != "log" or not _inside(LIST_BOX, x, y):
+            return
+        self.scroll = max(0, min(len(SAMPLES) - LIST_VISIBLE, self.scroll - 3 * notch))
+        self.events.append(f"SCROLL {self.scroll}")
+
+    def drop(self, x0: int, y0: int, x1: int, y1: int):
+        name = self._sample_at(x0, y0)
+        if name and not self.alarm and _inside(DROP_BOX, x1, y1):
+            self.dropped.append(name)
+            self.events.append(f"DROP {name}")
 
     # ------------------------------------------------------------ 입력
     def click(self, x: int, y: int, button: int = 1):
@@ -121,6 +156,15 @@ class DemoEquipmentApp:
                 self.page = name[4:]
                 self.lot_focus = False
                 return
+        if self.page == "log":
+            s = self._sample_at(x, y)
+            now = time.monotonic()
+            if s and self._last_click[1] == s and now - self._last_click[0] < 0.6:
+                self.events.append(f"OPEN {s}")
+                self._last_click = (0.0, None)
+            else:
+                self._last_click = (now, s)
+            return
         if self.page == "recipe":
             for i, (name, _) in enumerate(RECIPES):
                 if _inside((ROW_X, ROW_Y0 + i * ROW_GAP, ROW_W, ROW_H), x, y):
@@ -187,8 +231,21 @@ class DemoEquipmentApp:
             cv2.putText(img, f"RECIPE: {(self.selected or '-').upper()}", (560, 290), FONT, 0.8, WHITE, 2,
                         cv2.LINE_AA)
         else:
-            for i, ev in enumerate(self.events[-20:]):
-                cv2.putText(img, ev, (330, 120 + i * 40), FONT, 0.8, WHITE, 2, cv2.LINE_AA)
+            lx, ly, lw, lh = LIST_BOX
+            cv2.rectangle(img, (lx, ly), (lx + lw - 1, ly + lh - 1), (85, 80, 78), -1)
+            for i, name in enumerate(self.visible_samples()):
+                y = ly + i * LIST_ROW_H
+                cv2.line(img, (lx, y), (lx + lw - 1, y), (60, 58, 56), 1)
+                cv2.putText(img, name, (lx + 20, y + 42), FONT, 0.9, WHITE, 2, cv2.LINE_AA)
+            # 스크롤 막대
+            frac = self.scroll / max(1, len(SAMPLES) - LIST_VISIBLE)
+            cv2.rectangle(img, (lx + lw - 14, ly + int(frac * (lh - 120))), (lx + lw - 4, ly + int(frac * (lh - 120)) + 120),
+                          (160, 160, 160), -1)
+            dx, dy, dw, dh = DROP_BOX
+            cv2.rectangle(img, (dx, dy), (dx + dw - 1, dy + dh - 1), (70, 110, 70), -1)
+            cv2.putText(img, "DROP HERE", (dx + 110, dy + 90), FONT, 0.9, WHITE, 2, cv2.LINE_AA)
+            for i, name in enumerate(self.dropped[-3:]):
+                cv2.putText(img, name, (dx + 120, dy + 130 + i * 24), FONT, 0.6, WHITE, 1, cv2.LINE_AA)
 
         if self.alarm:
             x, y, w, h = ALARM

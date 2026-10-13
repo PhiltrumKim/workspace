@@ -230,6 +230,28 @@ class Runner:
                 raise StepFailed(f"{tdesc(target)} {state} ({timeout}s)")
             time.sleep(self.cfg["timing"]["poll"])
 
+    def _scroll_to(self, st: dict) -> str:
+        """target 이 보일 때까지 휠을 굴린다. at: 굴릴 위치(목록 위). 없으면 처음 커서 위치."""
+        t = st["target"]
+        notch = (1 if st.get("direction", "down") == "up" else -1) * int(st.get("step", 3))
+        at = st.get("at")
+        if isinstance(at, list):
+            ax, ay = int(at[0]), int(at[1])
+        elif at is not None:
+            (ax, ay), _ = self._point({"target": at})
+        else:
+            ax, ay = self.dev.pos
+        for i in range(int(st.get("max", 15)) + 1):
+            try:
+                m = self.wait_for(t, float(st.get("timeout", 0.5)))
+                self._last_box[self._tkey(t)] = m.box
+                return f"{tdesc(t)} 찾음 (휠 {abs(notch) * i}칸) score={m.score}"
+            except StepFailed:
+                if i == int(st.get("max", 15)) or self.stop_event.is_set():
+                    break
+                self.dev.scroll(notch, ax, ay)       # 커서를 치웠을 수 있으므로 매번 목록 위로 돌아가 굴림
+        raise StepFailed(f"{tdesc(t)}: {st.get('max', 15)}번 스크롤해도 안 보임")
+
     def _point(self, st: dict) -> Tuple[Tuple[int, int], str]:
         if "target" not in st:
             return (int(st["x"]), int(st["y"])), f"({st['x']},{st['y']})"
@@ -472,6 +494,22 @@ class Runner:
             else:
                 d.click(x, y, button=RIGHT if a == "right_click" else LEFT, double=(a == "double"))
             return where
+        if a == "scroll":
+            xy, where = (self._point(st) if ("target" in st or "x" in st) else ((None, None), "현재 위치"))
+            n = int(st["amount"])
+            d.scroll(n, *xy)
+            return f"휠 {'위' if n > 0 else '아래'}로 {abs(n)}칸 @ {where}"
+        if a == "drag":
+            (x0, y0), src = self._point(st)
+            to = st["to"]
+            if isinstance(to, list):
+                (x1, y1), dst = (int(to[0]), int(to[1])), f"({to[0]},{to[1]})"
+            else:
+                (x1, y1), dst = self._point({"target": to, "timeout": st.get("timeout", 3.0)})
+            d.drag(x0, y0, x1, y1)
+            return f"{src} → {dst}"
+        if a == "scroll_to":
+            return self._scroll_to(st)
         if a == "key":
             d.press(st["key"])
             return f"key {st['key']}"

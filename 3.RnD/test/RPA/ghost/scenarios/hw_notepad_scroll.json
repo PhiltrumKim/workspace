@@ -1,0 +1,30 @@
+{
+  "ghost": 1,
+  "name": "hw_notepad_scroll",
+  "description": "휠 스크롤 실장비 확인: 메모장 최대화 → 60줄 입력 → 맨 위로 → LINE-50 이 보일 때까지 휠로 내림 → 위로 굴려 LINE-1 확인 → 저장 없이 종료",
+  "steps": [
+    { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창 열기",
+      "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+    { "action": "key", "key": "home" },
+    { "action": "hotkey", "keys": ["shift", "end"] },
+    { "action": "type", "text": "notepad" },
+    { "action": "key", "key": "enter", "label": "메모장 실행",
+      "expect": { "visible": "notepad_title", "timeout": 10 } },
+    { "action": "hotkey", "keys": ["win", "up"], "label": "최대화" },
+    { "action": "repeat", "times": 60, "var": "i", "label": "60줄 입력", "steps": [
+      { "action": "type", "text": "LINE-${i}" },
+      { "action": "key", "key": "enter" } ] },
+    { "action": "hotkey", "keys": ["ctrl", "home"], "label": "맨 위로",
+      "expect": { "visible": { "text": "LINE-1", "match": "exact", "region": [0, 40, 600, 120] }, "timeout": 3 } },
+    { "action": "scroll_to", "target": { "text": "LINE-50", "match": "exact", "region": [0, 60, 600, 960] },
+      "at": [900, 500], "direction": "down", "step": 3, "max": 15, "label": "휠로 내려 LINE-50 찾기" },
+    { "action": "screenshot", "label": "scrolled" },
+    { "action": "scroll", "amount": 30, "x": 900, "y": 500, "label": "휠로 맨 위까지" },
+    { "action": "expect", "target": { "text": "LINE-1", "match": "exact", "region": [0, 40, 600, 120] }, "timeout": 3,
+      "label": "첫 줄이 다시 보이는지" },
+    { "action": "hotkey", "keys": ["alt", "f4"], "label": "닫기 요청",
+      "expect": { "visible": "save_prompt", "timeout": 3 } },
+    { "action": "click", "target": "dont_save_btn", "label": "저장 안 함",
+      "expect": { "gone": "notepad_title", "timeout": 3 }, "retry": 1 }
+  ]
+}

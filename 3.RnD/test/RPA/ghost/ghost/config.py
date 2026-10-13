@@ -37,6 +37,9 @@ DEFAULTS = {
         "capture_latency": 0.2,     # 이동 → 캡처 영상 반영 지연 (Magewell 실측 ~0.16s; 0.15s 에서 이전 프레임 오측정 발생)
         "jiggle_settle": 0.25,      # 흔들기 후 영상 반영 대기
         "click_hold": 0.06,
+        "wheel_gap": 0.05,            # 휠 칸 사이 간격
+        "drag_hold": 0.15,            # 드래그: 누른 뒤·이동 뒤 멈춤 (앱이 끌기를 인식할 시간)
+        "drag_step": 24,              # 드래그 이동 한 번의 최대 mickey (빠르면 앱이 놓칠 수 있음)
         "click_settle": 0.4,
         "key_hold": 0.03,
         "key_gap": 0.03,
@@ -108,7 +111,7 @@ SIM_OVERRIDES = {
     "ops": {"reconnect_backoff": [0.1, 0.1, 0.1], "poll_sec": 0.1},
     "blackbox": {"video": {"enabled": False}},     # 시뮬레이터 기본은 영상 끔 (테스트에서 필요 시 켬)
     "timing": {"move_step": 0.0, "capture_latency": 0.0, "jiggle_settle": 0.0, "click_hold": 0.0, "click_settle": 0.05,
-               "key_hold": 0.0, "key_gap": 0.0, "poll": 0.05},
+               "key_hold": 0.0, "key_gap": 0.0, "poll": 0.05, "wheel_gap": 0.0, "drag_hold": 0.0},
 }
 
 

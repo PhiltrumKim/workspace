@@ -47,13 +47,18 @@ def packet(cmd: int, payload: bytes = b"") -> bytes:
     return bytes(buf)
 
 
-def mouse_packet(dx: int, dy: int, buttons: int = 0, mstsc: bool = False) -> bytes:
+WHEEL_UP, WHEEL_DOWN = 0x09, 0x01        # MiTx MiDeviceMouseSerial::MouseWheel 과 같은 값 (#5 바이트)
+
+
+def mouse_packet(dx: int, dy: int, buttons: int = 0, mstsc: bool = False, wheel: int = 0) -> bytes:
+    """wheel: +1 위로 한 칸, -1 아래로 한 칸, 0 없음."""
     limit = 32767 if mstsc else 127
     dx = max(-limit, min(limit, int(dx)))
     dy = max(-limit, min(limit, int(dy)))
     sign = (0x10 if dx < 0 else 0) | (0x20 if dy > 0 else 0)
     b6 = 0x08 | sign | (buttons & 0x07)
-    payload = bytes([0x00, b6]) + struct.pack("<hh", dx, -dy)
+    w = WHEEL_UP if wheel > 0 else WHEEL_DOWN if wheel < 0 else 0x00
+    payload = bytes([w, b6]) + struct.pack("<hh", dx, -dy)
     return packet(CMD_MOUSE_MSTSC if mstsc else CMD_MOUSE, payload)
 
 
@@ -110,6 +115,9 @@ class RelayBoard(HidOutput):
 
     def mouse_move(self, dx: int, dy: int, buttons: int = 0) -> None:
         self.send(mouse_packet(dx, dy, buttons))
+
+    def mouse_wheel(self, notch: int, buttons: int = 0) -> None:
+        self.send(mouse_packet(0, 0, buttons, wheel=notch))
 
     def key(self, vk: int, scan: int, extended: bool, up: bool, modifiers: int = 0) -> None:
         self.send(key_packet(vk, scan, extended, up, modifiers))

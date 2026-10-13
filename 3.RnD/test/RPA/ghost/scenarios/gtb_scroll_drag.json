@@ -1,0 +1,34 @@
+{
+  "ghost": 1,
+  "name": "gtb_scroll_drag",
+  "description": "GTB-3000: 레시피 표에서 RCP-025 찾기(필요하면 휠 스크롤) → 더블클릭 불러오기 → 확인 창 '예' → 불러온 레시피 확인 → 창 제목줄을 끌어 이동 (드래그) → 종료",
+  "params": {
+    "recipe": { "default": "RCP-025", "description": "불러올 레시피 ID" }
+  },
+  "on_abort": "gtb_close",
+  "steps": [
+    { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창", "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+    { "action": "key", "key": "home" },
+    { "action": "hotkey", "keys": ["shift", "end"] },
+    { "action": "type", "text": "%USERPROFILE%\\Desktop\\dist\\GTB3000.exe /user=operator /seed=1" },
+    { "action": "key", "key": "enter", "label": "GTB-3000 실행" },
+    { "action": "wait_for", "target": { "text": "Recipe Parameters", "region": [1100, 170, 560, 60] }, "timeout": 20 },
+
+    { "action": "scroll_to", "target": { "text": "${recipe}", "match": "exact", "region": [280, 190, 120, 700] },
+      "at": [700, 520], "direction": "down", "step": 3, "max": 10, "label": "레시피 표를 휠로 내려 찾기" },
+    { "action": "double", "target": { "text": "${recipe}", "match": "exact", "region": [280, 190, 120, 700] },
+      "label": "더블클릭 = 불러오기",
+      "expect": { "visible": { "text": "불러오시겠습니까", "region": [500, 350, 950, 350] }, "timeout": 6 }, "retry": 1 },
+    { "action": "key", "key": "y", "label": "확인 창 '예'",
+      "expect": { "gone": { "text": "불러오시겠습니까", "region": [500, 350, 950, 350] }, "timeout": 6 } },
+    { "action": "expect", "target": { "text": "${recipe}", "region": [1150, 520, 460, 70] }, "timeout": 3,
+      "label": "Loaded 에 표시됐는지" },
+
+    { "action": "drag", "target": { "text": "GTB-3000 Analyzer", "region": [260, 60, 760, 70] }, "to": [600, 200],
+      "label": "제목줄을 끌어 창 이동" },
+    { "action": "expect", "target": { "text": "GTB-3000 Analyzer", "region": [500, 170, 800, 60] }, "timeout": 3,
+      "label": "창이 옮겨졌는지" },
+    { "action": "screenshot", "label": "moved" },
+    { "action": "call", "scenario": "gtb_close", "label": "종료" }
+  ]
+}

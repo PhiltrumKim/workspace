@@ -112,13 +112,13 @@ class Device:
         if self.t["move_step"]:
             time.sleep(self.t["move_step"])
 
-    def _push(self, mx: int, my: int) -> None:
-        """mickey 단위 상대 이동을 max_step 단위로 쪼개 전송."""
-        step = self.hid.max_step
+    def _push(self, mx: int, my: int, buttons: int = 0, step: Optional[int] = None) -> None:
+        """mickey 단위 상대 이동을 max_step 단위로 쪼개 전송. buttons: 누른 채 이동(드래그)."""
+        step = step or self.hid.max_step
         while mx or my:
             sx = max(-step, min(step, mx))
             sy = max(-step, min(step, my))
-            self._send(sx, sy)
+            self._send(sx, sy, buttons)
             mx -= sx
             my -= sy
 
@@ -290,6 +290,37 @@ class Device:
             self._send(0, 0, 0)
             time.sleep(self.t["click_hold"])
         time.sleep(self.t["click_settle"])
+        return self.pos
+
+    # ------------------------------------------------------------ 휠·드래그
+    def scroll(self, notches: int, x: Optional[int] = None, y: Optional[int] = None) -> Point:
+        """휠 notches 칸 (+위, -아래). x,y 를 주면 그 위치로 커서를 옮긴 뒤 굴린다 (휠은 커서 아래 창에 감)."""
+        if x is not None and y is not None:
+            self.move_to(x, y)
+        for _ in range(abs(int(notches))):
+            self.hid.mouse_wheel(1 if notches > 0 else -1)
+            time.sleep(self.t["wheel_gap"])
+        time.sleep(self.t["click_settle"])
+        return self.pos
+
+    def drag(self, x0: int, y0: int, x1: int, y1: int, button: int = LEFT) -> Point:
+        """(x0,y0) 에서 눌러 (x1,y1) 에서 놓기. 누른 동안에는 커서 실측(흔들기)을 할 수 없으므로
+        시작점을 확인해 맞춘 뒤 작은 걸음으로 이동하고, 놓은 뒤 위치를 다시 잰다."""
+        self.move_to(x0, y0, verify=True)
+        self._send(0, 0, button)
+        time.sleep(self.t["drag_hold"])
+        sx, sy = self.pos
+        mx = int(round((x1 - sx) / self.gain[0]))
+        my = int(round((y1 - sy) / self.gain[1]))
+        n0 = 4 if abs(mx) + abs(my) > 8 else 1                 # 끌기 시작 인식 (Windows 드래그 문턱 ~4px)
+        self._push(mx // n0, my // n0, button, step=8)
+        time.sleep(self.t["drag_hold"])
+        self._push(mx - mx // n0, my - my // n0, button, step=self.t["drag_step"])
+        time.sleep(self.t["drag_hold"])
+        self._send(0, 0, 0)
+        time.sleep(self.t["click_settle"])
+        self.pos, self.measured = (int(x1), int(y1)), False
+        self.distrust()                                         # 다음 이동은 실측부터
         return self.pos
 
     # ------------------------------------------------------------ 키보드
