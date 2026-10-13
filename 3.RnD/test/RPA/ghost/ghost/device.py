@@ -28,6 +28,14 @@ from .hal.base import LEFT, DeviceError, HidOutput, VideoSource  # noqa: F401  (
 Point = Tuple[int, int]
 
 
+def _accepts_timeout(video) -> bool:
+    import inspect
+    try:
+        return "timeout" in inspect.signature(video.read).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 class Device:
     def __init__(self, video: VideoSource, hid: HidOutput, cfg: dict,
                  log: Optional[Callable[[str], None]] = None):
@@ -91,6 +99,9 @@ class Device:
     # ------------------------------------------------------------ 영상
     def frame(self) -> np.ndarray:
         f = self.video.read()
+        if f is None:                               # 캡처가 순간 멈춘 경우(실장비 밤샘 시험에서 확인) 한 번 더 길게 기다림
+            self.stats["frame_retries"] = self.stats.get("frame_retries", 0) + 1
+            f = self.video.read(timeout=3.0) if _accepts_timeout(self.video) else self.video.read()
         if f is None:
             raise DeviceError("no video frame")
         return f

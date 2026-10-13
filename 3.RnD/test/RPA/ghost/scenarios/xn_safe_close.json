@@ -1,13 +1,69 @@
 {
   "ghost": 1,
   "name": "xn_safe_close",
-  "description": "XNote Stopwatch 종료 (메뉴 Close). 정상 종료와 안전 복귀(on_abort)에서 공용",
+  "description": "XNote Stopwatch 종료. 정상 종료와 안전 복귀(on_abort)에서 공용. 창이 여러 개 떠 있어도 모두 닫는다. 메뉴 글자 위치에 기대지 않도록 Alt+F4 로 닫음",
   "steps": [
-    { "action": "if", "cond": { "visible": "run_prompt" }, "label": "실행 창이 남아 있으면 닫기",
-      "then": [ { "action": "key", "key": "esc" } ] },
-    { "action": "key", "key": "esc", "label": "열린 메뉴가 있으면 닫기" },
-    { "action": "right_click", "target": "xn_display", "timeout": 3,
-      "expect": { "visible": "menu_close", "timeout": 3 }, "retry": 1 },
-    { "action": "click", "target": "menu_close", "expect": { "gone": "xn_display", "timeout": 3 } }
+    {
+      "action": "if",
+      "cond": {
+        "visible": "run_prompt"
+      },
+      "label": "실행 창이 남아 있으면 닫기",
+      "then": [
+        {
+          "action": "key",
+          "key": "esc"
+        }
+      ]
+    },
+    {
+      "action": "while",
+      "cond": {
+        "visible": "xn_display"
+      },
+      "max": 4,
+      "label": "스톱워치 창이 보이는 동안 (중복 실행된 창까지)",
+      "steps": [
+        {
+          "action": "key",
+          "key": "esc",
+          "label": "열린 메뉴·정보 창이 있으면 닫기"
+        },
+        {
+          "action": "right_click",
+          "target": "xn_display",
+          "timeout": 3,
+          "expect": {
+            "visible": "menu_close",
+            "timeout": 3
+          },
+          "retry": 1,
+          "label": "스톱워치 창에 초점 (메뉴가 뜨면 확인)"
+        },
+        {
+          "action": "key",
+          "key": "esc",
+          "label": "메뉴 닫기"
+        },
+        {
+          "action": "hotkey",
+          "keys": [
+            "alt",
+            "f4"
+          ],
+          "label": "창 닫기"
+        },
+        {
+          "action": "wait",
+          "sec": 1
+        }
+      ]
+    },
+    {
+      "action": "wait_gone",
+      "target": "xn_display",
+      "timeout": 3,
+      "label": "모두 닫혔는지 확인"
+    }
   ]
 }

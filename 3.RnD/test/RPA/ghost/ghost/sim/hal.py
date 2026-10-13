@@ -80,9 +80,12 @@ class SimWorld:
         ox, oy = self.offset
         frame = np.zeros_like(img)
         frame[oy:, ox:] = img[:self.h - oy, :self.w - ox]
-        if self.noise:
-            n = self.rng.normal(0, self.noise, frame.shape)
-            frame = np.clip(frame.astype(np.float32) + n, 0, 255).astype(np.uint8)
+        if self.noise:                                # 미리 만든 잡음 몇 장을 돌려 씀 (매번 생성하면 프레임당 수백 ms)
+            if getattr(self, "_noise", None) is None or self._noise[0].shape != frame.shape:
+                self._noise = [np.round(self.rng.normal(0, self.noise, frame.shape)).astype(np.int16) for _ in range(4)]
+                self._noise_i = 0
+            self._noise_i = (self._noise_i + 1) % len(self._noise)
+            frame = np.clip(frame.astype(np.int16) + self._noise[self._noise_i], 0, 255).astype(np.uint8)
         return frame
 
 

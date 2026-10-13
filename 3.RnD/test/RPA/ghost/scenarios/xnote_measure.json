@@ -5,6 +5,8 @@
   "watch": "watch_xnote.json",
   "on_abort": "xn_safe_close",
   "steps": [
+    { "action": "if", "cond": { "visible": "xn_display" }, "label": "이전에 켜진 스톱워치가 있으면 먼저 닫기 (중복 실행 방지)",
+      "then": [ { "action": "call", "scenario": "xn_safe_close" } ] },
     { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창",
       "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
     { "action": "key", "key": "home", "label": "입력칸에 남은 글자 선택 (이전 실행이 중간에 끊긴 경우)" },

@@ -110,3 +110,29 @@ def test_continuous_recording(vcfg):
         d.close()
     n, shape = _frames(os.path.join(res.run_dir, "run.mp4"))
     assert res.ok and n >= 12                              # ~1.5s 이상 * 10fps
+
+
+def test_hub_slow_source_not_reported_as_lost():
+    """캡처가 느린 환경(프레임당 0.6s)에서도 '끊김(None)'으로 오판하지 않는다 — 편집기 운영 작업 no video frame 회귀."""
+    import time
+
+    import numpy as np
+
+    from ghost.hal.base import VideoSource
+    from ghost.hal.hub import FrameHub
+
+    class Slow(VideoSource):
+        def open(self): pass
+        def close(self): pass
+        size = (64, 48)
+        def read(self):
+            time.sleep(0.6)
+            return np.zeros((48, 64, 3), np.uint8)
+
+    hub = FrameHub(Slow(), max_fps=30)
+    hub.open()
+    try:
+        assert all(hub.read() is not None for _ in range(3))
+        assert 0.5 < hub.period < 0.8
+    finally:
+        hub.close()

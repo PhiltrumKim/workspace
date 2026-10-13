@@ -32,6 +32,7 @@ class FrameHub(VideoSource):
         self._thread: Optional[threading.Thread] = None
         self.frames = 0
         self.errors = 0
+        self.period = 0.0                           # 최근 프레임 주기(초, 지수 평균)
 
     # VideoSource -------------------------------------------------------
     def open(self) -> None:
@@ -40,6 +41,7 @@ class FrameHub(VideoSource):
         self.source.open()
         self._stop.clear()
         self._latest, self._latest_t = None, 0.0
+        self.period = 0.0
         self._thread = threading.Thread(target=self._loop, name="FrameHub", daemon=True)
         self._thread.start()
         if self.read(timeout=3.0) is None:          # 첫 프레임 확보
@@ -50,6 +52,9 @@ class FrameHub(VideoSource):
         (캡처가 끝난 시각으로 판단하면, 호출 직전에 찍기 시작한 = 직전 상태의 프레임을 넘길 수 있다.
          시뮬레이터에서 커서 실측이 흔들기 크기 8px 만큼 틀리는 간헐 오류로 확인)"""
         t_call = time.monotonic()
+        # 호출 직후 시작한 프레임이 끝날 때까지는 최악 '프레임 주기 2배'가 걸린다. 캡처가 느린 환경(부하, 느린 장치)에서
+        # 정상인데도 끊김으로 판정하지 않도록 실제 주기의 3배까지는 기다린다.
+        timeout = max(timeout, 3.0 * self.period)
         with self._cond:
             fresh = self._cond.wait_for(lambda: self._latest_t >= t_call or self._stop.is_set(), timeout)
             if not fresh or self._latest is None:
@@ -86,6 +91,8 @@ class FrameHub(VideoSource):
                 time.sleep(0.02)
                 continue
             ts = t0                                 # 캡처 시작 시각 (read 판단 기준)
+            dt = time.monotonic() - t0
+            self.period = dt if self.period == 0.0 else 0.8 * self.period + 0.2 * dt
             with self._cond:
                 self._latest, self._latest_t = f, ts
                 self.frames += 1
