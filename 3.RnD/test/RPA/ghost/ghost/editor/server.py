@@ -611,6 +611,8 @@ def make_handler(app: EditorApp):
 
 
 def serve(app: EditorApp, port: int = 8765, host: str = "127.0.0.1") -> ThreadingHTTPServer:
-    httpd = ThreadingHTTPServer((host, port), make_handler(app))
+    class Server(ThreadingHTTPServer):
+        request_queue_size = 64                         # 기본 5: 화면·로그·상태 갱신이 겹치면 연결 거절이 났음
+    httpd = Server((host, port), make_handler(app))
     httpd.daemon_threads = True
     return httpd

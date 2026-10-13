@@ -202,3 +202,24 @@ def test_ops_tab(page_and_app):
     shot = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runs", "_work", "ops_tab.png")
     page.screenshot(path=shot)
     assert not errors, errors
+
+
+def test_late_run_poll_does_not_overwrite(page_and_app):
+    """실행 상태 응답이 늦게 도착해도, 그 사이 바꾼 시나리오의 메시지를 덮어쓰지 않는다 (간헐 실패 원인 회귀)."""
+    page, app, w, errors, tmp = page_and_app
+    # 서버가 바쁠 때처럼 실행 상태 응답만 2.5초 늦게 도착하게 함 → 요청이 겹쳐 쌓임
+    page.evaluate("""() => { const f = window.fetch;
+      window.fetch = async (u, o) => { const r = await f(u, o);
+        if (String(u) === '/api/run' && (!o || !o.method || o.method === 'GET')) await new Promise((ok) => setTimeout(ok, 2500));
+        return r; }; }""")
+    page.select_option("#scen-select", "demo_run_recipe")
+    page.wait_for_selector("#steps li.step")
+    page.click("#scen-run")
+    page.wait_for_function("document.querySelector('#scen-msg').textContent.includes('성공')", timeout=90000)
+    page.select_option("#scen-select", "ack_alarm")      # 다른 시나리오로 바꿔 저장 (빈 시나리오는 저장 거부)
+    page.wait_for_function("document.querySelector('#scen-name').value === 'ack_alarm'")
+    page.click("#scen-save")
+    page.wait_for_function("document.querySelector('#scen-msg').textContent.includes('저장했습니다')")
+    page.wait_for_timeout(4000)                          # 쌓여 있던 응답이 모두 도착할 시간
+    assert "저장했습니다" in page.text_content("#scen-msg")
+    assert errors == [], errors

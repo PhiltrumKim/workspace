@@ -17,8 +17,20 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 
 async function api(method, path, body) {
-  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" },
-                                body: body === undefined ? undefined : JSON.stringify(body) });
+  // 서버가 바쁜 순간 연결이 거절될 수 있다. 조회(GET)만 잠깐 뒤 다시 시도한다
+  // (조작 요청은 응답만 잃었을 수도 있어 다시 보내면 두 번 실행될 위험).
+  const tries = method === "GET" ? 3 : 1;
+  let r;
+  for (let i = 0; ; i++) {
+    try {
+      r = await fetch(path, { method, headers: { "Content-Type": "application/json" },
+                              body: body === undefined ? undefined : JSON.stringify(body) });
+      break;
+    } catch (err) {
+      if (i + 1 >= tries) throw new Error(`서버에 연결하지 못했습니다 (${err.message})`);
+      await new Promise((ok) => setTimeout(ok, 300 * (i + 1)));
+    }
+  }
   const data = r.headers.get("Content-Type")?.includes("json") ? await r.json() : await r.text();
   if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
   return data;
@@ -868,23 +880,35 @@ async function startRun(params) {
     await api("POST", "/api/run", { scenario: currentScenario(), params });
     $("#scen-run").disabled = true; $("#scen-stop").disabled = false;
     msg($("#scen-msg"), `실행 중…${Object.keys(params).length ? ` ${JSON.stringify(params)}` : ""}`, "info");
+    S.runOwner = S.scen;                              // 실행을 시작한 시나리오 (다른 시나리오로 바꾸면 결과를 그리지 않음)
     S.runPoll = setInterval(pollRun, 600);
   } catch (err) { msg($("#scen-msg"), err.message, "bad"); }
 }
 $("#scen-stop").addEventListener("click", () => api("POST", "/api/run/stop"));
 
 async function pollRun() {
-  const r = await api("GET", "/api/run");
-  for (const sr of r.steps) S.stepResults[sr.index] = sr;
-  const top = Object.keys(S.stepResults).filter((k) => /^\d+$/.test(k)).map(Number);
-  S.runningIdx = r.running ? String(top.length ? Math.max(...top) + 1 : 0) : null;
-  renderSteps();
+  // 서버가 느리면 응답이 쌓여 늦게 도착한다. 한 번에 하나만 묻고, 이미 끝난 실행이나 화면에서 바뀐
+  // 시나리오에는 결과를 그리지 않는다 (늦게 온 '성공' 메시지가 새 시나리오의 메시지를 덮어쓰던 문제).
+  if (S.pollBusy) return;
+  S.pollBusy = true;
+  let r;
+  try { r = await api("GET", "/api/run"); } catch { return; } finally { S.pollBusy = false; }
+  if (!S.runPoll) return;
+  const mine = S.runOwner === S.scen;
+  if (mine) {
+    for (const sr of r.steps) S.stepResults[sr.index] = sr;
+    const top = Object.keys(S.stepResults).filter((k) => /^\d+$/.test(k)).map(Number);
+    S.runningIdx = r.running ? String(top.length ? Math.max(...top) + 1 : 0) : null;
+    renderSteps();
+  }
   if (!r.running) {
-    clearInterval(S.runPoll); S.runPoll = null;
+    clearInterval(S.runPoll); S.runPoll = null; S.runningIdx = null;
     $("#scen-run").disabled = false; $("#scen-stop").disabled = true;
     const vals = Object.keys(r.values || {}).length ? `\n읽은 값: ${JSON.stringify(r.values)}` : "";
     const why = r.stopped ? " (중지됨)" : r.aborted_by ? ` (감시 '${r.aborted_by}'로 중단)` : "";
-    msg($("#scen-msg"), `${r.ok ? "✓ 성공" : "✗ 실패"}${why} · 기록 ${r.run_dir}${vals}`, r.ok ? "ok" : "bad");
+    const text = `${r.ok ? "✓ 성공" : "✗ 실패"}${why} · 기록 ${r.run_dir}${vals}`;
+    if (mine) msg($("#scen-msg"), text, r.ok ? "ok" : "bad");
+    else log(`[실행 끝] ${r.name || ""} ${text}`);
   }
 }
 
