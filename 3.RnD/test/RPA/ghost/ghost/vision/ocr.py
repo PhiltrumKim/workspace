@@ -46,6 +46,7 @@ class TextHit:
     text: str
     box: Box
     conf: float
+    parts: Optional[list] = None        # group_lines 로 묶은 줄이면 구성 단어들 (왼→오른쪽)
 
     @property
     def center(self) -> Tuple[int, int]:
@@ -190,8 +191,55 @@ class OcrEngine:
         hits = self.read(frame, region, scale, line)
         for h in hits + group_lines(hits):
             if text_matches(h.text, query, mode, min_ratio):
-                return h
+                return narrow(h, query, mode, min_ratio)
         return None
+
+
+def _span(text: str, query: str) -> Optional[Tuple[int, int]]:
+    """text 안에서 query 가 차지하는 원문 글자 범위 (공백·대소문자 무시)."""
+    keep = [(i, c) for i, c in enumerate(text) if not c.isspace()]
+    flat = normalize("".join(c for _, c in keep))
+    q = normalize(query)
+    if not q or len(flat) != len(keep):
+        return None
+    k = flat.find(q)
+    if k < 0:
+        return None
+    return keep[k][0], keep[k + len(q) - 1][0] + 1
+
+
+def narrow(hit: TextHit, query: str, mode: str = "contains", min_ratio: float = 0.9) -> TextHit:
+    """찾은 결과가 query 보다 넓으면(줄 전체, 여러 단어가 붙은 덩어리) query 부분으로 상자를 좁힌다.
+    GTB-3000 측정: 탭 줄 'Recipe Run Monitor Results ...' 를 한 덩어리로 읽으면 가운데(엉뚱한 탭)를 눌렀음.
+      1) 묶인 줄이면 query 를 담는 가장 짧은 연속 단어 묶음
+      2) 한 덩어리 안에 다른 글자가 섞여 있으면 글자 위치 비율로 가로 범위를 좁힘"""
+    if mode in ("exact", "regex") or normalize(hit.text) == normalize(query):
+        return hit
+    h = hit
+    if hit.parts:
+        best = None
+        n = len(hit.parts)
+        for i in range(n):
+            for j in range(i, n):
+                seg = hit.parts[i:j + 1]
+                if text_matches(" ".join(p.text for p in seg), query, mode, min_ratio):
+                    if best is None or (j - i) < (best[1] - best[0]):
+                        best = (i, j)
+                    break
+        if best is not None:
+            seg = hit.parts[best[0]:best[1] + 1]
+            x0 = min(p.box[0] for p in seg)
+            y0 = min(p.box[1] for p in seg)
+            x1 = max(p.box[0] + p.box[2] for p in seg)
+            y1 = max(p.box[1] + p.box[3] for p in seg)
+            h = TextHit(" ".join(p.text for p in seg), (x0, y0, x1 - x0, y1 - y0), round(min(p.conf for p in seg), 3))
+    sp = _span(h.text, query) if mode == "contains" else None
+    if sp and (sp[1] - sp[0]) < len(h.text.strip()):
+        x, y, w, hh = h.box
+        n = max(1, len(h.text))
+        a, b = x + int(w * sp[0] / n), x + int(w * sp[1] / n)
+        h = TextHit(h.text[sp[0]:sp[1]], (a, y, max(1, b - a), hh), h.conf)
+    return h
 
 
 def join_text(hits: List[TextHit]) -> str:
@@ -216,7 +264,7 @@ def group_lines(hits: List[TextHit]) -> List[TextHit]:
         x1 = max(h.box[0] + h.box[2] for h in ln)
         y1 = max(h.box[1] + h.box[3] for h in ln)
         out.append(TextHit(" ".join(h.text for h in ln), (x0, y0, x1 - x0, y1 - y0),
-                           round(min(h.conf for h in ln), 3)))
+                           round(min(h.conf for h in ln), 3), parts=list(ln)))
     return out
 
 

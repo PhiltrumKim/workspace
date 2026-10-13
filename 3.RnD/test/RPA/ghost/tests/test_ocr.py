@@ -133,3 +133,17 @@ def test_on_abort_runs_on_step_failure(cfg):
     res = r.run({"ghost": 1, "name": "fail_then_recover", "on_abort": "to_run_page", "steps": [
         {"action": "wait_for", "target": "status_done", "timeout": 0.2}]})
     assert not res.ok and w.app.page == "run" and any(s.index.startswith("R.") for s in res.steps)
+
+
+def test_narrow_to_matched_words():
+    """줄로 묶인 결과에서 찾는 글자 부분으로 상자를 좁힌다 (GTB-3000 탭 줄 오클릭 회귀)."""
+    from ghost.vision.ocr import TextHit, group_lines, narrow
+    words = [TextHit("Recipe", (10, 100, 50, 20), 0.9), TextHit("Run", (70, 100, 30, 20), 0.9),
+             TextHit("Monitor", (104, 100, 60, 20), 0.9), TextHit("Results", (175, 100, 55, 20), 0.9)]
+    line = [g for g in group_lines(words)][0]
+    h = narrow(line, "Run Monitor")
+    assert h.box == (70, 100, 94, 20) and h.text == "Run Monitor"
+    one = TextHit("Recipe Run Monitor Results", (0, 0, 260, 20), 0.9)      # 검출기가 한 덩어리로 낸 경우
+    c = narrow(one, "Results").center
+    assert 190 < c[0] < 260
+    assert narrow(one, "Recipe Run Monitor Results") is one
