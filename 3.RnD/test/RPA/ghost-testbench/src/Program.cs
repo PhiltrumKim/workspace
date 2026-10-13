@@ -27,6 +27,7 @@ namespace GhostTestBench
         public double TimeScale = 1.0;       // 측정 시간 배율 (0.5 = 절반)
         public int Seed = 0;                 // 0 이면 시각 기반
         public string Style = "native";
+        public float UiScale = 1.0f;           // 화면 배율 흉내 (1.25 = 125%): 글꼴·컨트롤 크기·위치를 함께 키움
         public int Tab = 0;                       // 시작 탭 (0 Recipe, 1 Run, 2 Results, 3 Alarm, 4 Settings)
         public string AutoUser = "";             // 지정 시 로그인 창 생략 (무인 시작·화면 확인용)      // native(OS 기본) | classic(고전 입체) | flat(Win10/11 평면) | dark
 
@@ -54,6 +55,7 @@ namespace GhostTestBench
                     else if (k == "style") s.Style = v.ToLowerInvariant();
                     else if (k == "user") s.AutoUser = v;
                     else if (k == "tab") s.Tab = int.Parse(v);
+                    else if (k == "scale") s.UiScale = float.Parse(v, CultureInfo.InvariantCulture);
                 }
                 catch (Exception) { }
             }
@@ -63,8 +65,8 @@ namespace GhostTestBench
         public override string ToString()
         {
             return string.Format(CultureInfo.InvariantCulture,
-                "alarm={0};warn={1};delay={2};freeze={3}%/{4}s;randompos={5};smallfont={6};timescale={7};seed={8};style={9}",
-                AlarmPerMin, WarnPerMin, DelayMs, FreezePct, FreezeSec, RandomPos, SmallFont, TimeScale, Seed, Style);
+                "alarm={0};warn={1};delay={2};freeze={3}%/{4}s;randompos={5};smallfont={6};timescale={7};seed={8};style={9};scale={10}",
+                AlarmPerMin, WarnPerMin, DelayMs, FreezePct, FreezeSec, RandomPos, SmallFont, TimeScale, Seed, Style, UiScale);
         }
     }
 
@@ -547,6 +549,34 @@ namespace GhostTestBench
             if (Program.Style == "dark") { seg.BackColor = Color.Black; warnBanner.BackColor = Color.FromArgb(120, 90, 10); warnBanner.ForeColor = Color.White; }
             if (cfg.Tab > 0 && cfg.Tab < tabs.TabCount) tabs.SelectedIndex = cfg.Tab;
             if (Program.Style != "native") Text += "  (style: " + Program.Style + ")";
+            if (Math.Abs(cfg.UiScale - 1f) > 0.01f) ScaleUi(cfg.UiScale);
+        }
+
+        // ---------------------------------------------------------------- 화면 배율 흉내 (/scale)
+        // Windows 화면 배율(125%·150%)처럼 글꼴과 컨트롤 크기·위치를 함께 키운다. 시스템 설정은 바꾸지 않는다.
+        void ScaleUi(float k)
+        {
+            List<KeyValuePair<Control, Font>> fonts = new List<KeyValuePair<Control, Font>>();
+            CollectFonts(this, fonts);
+            SuspendLayout();
+            foreach (KeyValuePair<Control, Font> kv in fonts)
+                kv.Key.Font = new Font(kv.Value.FontFamily, kv.Value.Size * k, kv.Value.Style);
+            Scale(new SizeF(k, k));
+            foreach (DataGridView g in new DataGridView[] { recipeGrid, resultGrid, waferGrid })
+            {
+                g.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
+                g.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            }
+            ResumeLayout();
+            StartPosition = FormStartPosition.Manual;
+            Location = new Point(0, 0);
+            Text += string.Format("  (scale {0:0}%)", k * 100);
+        }
+
+        static void CollectFonts(Control c, List<KeyValuePair<Control, Font>> acc)
+        {
+            acc.Add(new KeyValuePair<Control, Font>(c, c.Font));   // 바꾸기 전에 모두 기록 (물려받은 글꼴이 두 번 커지지 않게)
+            foreach (Control ch in c.Controls) CollectFonts(ch, acc);
         }
 
         // ---------------------------------------------------------------- 화면 요소 위치 (인식률 측정용 정답)
