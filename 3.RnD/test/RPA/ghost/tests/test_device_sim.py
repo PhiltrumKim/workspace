@@ -68,7 +68,7 @@ def test_typing_and_modifier_release(cfg):
     d.release_all_keys()
     assert d._mods == 0
     with pytest.raises(ValueError):
-        d.type_text("ok한")
+        d.type_text("oké")              # 지원하지 않는 글자 (한글은 입력기 전환으로 지원)
     assert w.app.lot == "Ab-_9("                       # 검증 실패 시 부분 입력 없음
 
 
