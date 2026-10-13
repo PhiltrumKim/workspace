@@ -393,6 +393,8 @@ namespace GhostTestBench
         CheckBox setSmall = new CheckBox();
 
         System.Windows.Forms.Timer tick = new System.Windows.Forms.Timer();
+        System.Windows.Forms.Timer uiTimer = new System.Windows.Forms.Timer();   // 창 이동 후 화면 위치 다시 기록 (지연)
+        ToolStrip toolBar;
         Recipe loaded;
         string state = "IDLE";          // IDLE / RUN / PAUSE / ALARM
         double elapsed, duration;
@@ -426,7 +428,13 @@ namespace GhostTestBench
             tabs.TabPages.Add(BuildResultTab());
             tabs.TabPages.Add(BuildAlarmTab());
             tabs.TabPages.Add(BuildSettingsTab());
-            tabs.SelectedIndexChanged += delegate { TruthLog.Write("tab", tabs.SelectedTab.Text); };
+            tabs.SelectedIndexChanged += delegate { TruthLog.Write("tab", tabs.SelectedTab.Text); DumpUiLater("tab"); };
+            uiTimer.Interval = 600;
+            uiTimer.Tick += delegate { uiTimer.Stop(); DumpUi(uiReason); };
+            Shown += delegate { DumpUiLater("shown"); };
+            Move += delegate { DumpUiLater("move"); };
+            Resize += delegate { DumpUiLater("resize"); };
+            recipeGrid.Scroll += delegate { DumpUiLater("scroll"); };
             Controls.Add(tabs);
             tabs.BringToFront();
 
@@ -441,6 +449,58 @@ namespace GhostTestBench
             if (Program.Style == "dark") { seg.BackColor = Color.Black; warnBanner.BackColor = Color.FromArgb(120, 90, 10); warnBanner.ForeColor = Color.White; }
             if (cfg.Tab > 0 && cfg.Tab < tabs.TabCount) tabs.SelectedIndex = cfg.Tab;
             if (Program.Style != "native") Text += "  (style: " + Program.Style + ")";
+        }
+
+        // ---------------------------------------------------------------- 화면 요소 위치 (인식률 측정용 정답)
+        // 보이는 메뉴·툴바·탭·컨트롤·표 행의 화면 좌표를 정답 로그에 남긴다. GHOST 가 찾은 위치와 비교한다.
+        string uiReason = "";
+        void DumpUiLater(string reason) { uiReason = reason; uiTimer.Stop(); uiTimer.Start(); }
+
+        static string R(Rectangle r) { return string.Format("{0} {1} {2} {3}", r.X, r.Y, r.Width, r.Height); }
+
+        void Ui(string kind, Rectangle screen, string text, bool enabled)
+        {
+            if (screen.Width <= 0 || screen.Height <= 0) return;
+            TruthLog.Write("ui", string.Format("kind={0};enabled={1};rect={2};text={3}", kind, enabled ? 1 : 0, R(screen),
+                (text ?? "").Replace("\r", " ").Replace("\n", " ")));
+        }
+
+        void DumpUi(string reason)
+        {
+            if (!IsHandleCreated || WindowState == FormWindowState.Minimized) return;
+            TruthLog.Write("ui_begin", string.Format("reason={0};tab={1};client={2}", reason, tabs.SelectedTab.Text, R(RectangleToScreen(ClientRectangle))));
+            if (MainMenuStrip != null)
+                foreach (ToolStripItem it in MainMenuStrip.Items)
+                    Ui("menu", MainMenuStrip.RectangleToScreen(it.Bounds), it.Text, it.Enabled);
+            if (toolBar != null)
+                foreach (ToolStripItem it in toolBar.Items)
+                    if (!(it is ToolStripSeparator)) Ui("toolbar", toolBar.RectangleToScreen(it.Bounds), it.Text, it.Enabled);
+            for (int i = 0; i < tabs.TabCount; i++)
+                Ui("tab", tabs.RectangleToScreen(tabs.GetTabRect(i)), tabs.TabPages[i].Text, true);
+            Walk(tabs.SelectedTab);
+            if (tabs.SelectedTab.Controls.Contains(recipeGrid))
+                for (int i = 0; i < recipeGrid.Rows.Count; i++)
+                {
+                    Rectangle rr = recipeGrid.GetRowDisplayRectangle(i, true);
+                    if (rr.Height > 0) Ui(recipeGrid.Rows[i].Selected ? "row_selected" : "row", recipeGrid.RectangleToScreen(rr),
+                        (string)recipeGrid.Rows[i].Cells[0].Value + " " + recipeGrid.Rows[i].Cells[1].Value, true);
+                }
+            TruthLog.Write("ui_end", reason);
+        }
+
+        void Walk(Control parent)
+        {
+            foreach (Control c in parent.Controls)
+            {
+                if (!c.Visible) continue;
+                Rectangle sr = parent.RectangleToScreen(c.Bounds);
+                string kind = c.GetType().Name;
+                string text = c is SegmentDisplay ? ((SegmentDisplay)c).Value : c.Text;
+                if (c is ComboBox || c is NumericUpDown || c is DataGridView || c is ListView || c is ListBox)
+                { Ui(kind, sr, text, c.Enabled); continue; }
+                Ui(kind, sr, text, c.Enabled);
+                if (c.Controls.Count > 0) Walk(c);
+            }
         }
 
         void BuildRecipes()
@@ -493,6 +553,7 @@ namespace GhostTestBench
             ms.Items.AddRange(new ToolStripItem[] { file, rcp, run, tools, help });
 
             ToolStrip ts = new ToolStrip();
+            toolBar = ts;
             ts.ImageScalingSize = new Size(16, 16);
             ts.Items.Add("▶ Start", null, delegate { Delayed("start", StartRun); });
             ts.Items.Add("❚❚ Pause", null, delegate { Delayed("pause", TogglePause); });

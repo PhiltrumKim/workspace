@@ -84,11 +84,13 @@ GTB3000.exe /alarm=2 /warn=3 /delay=800 /freeze=20 /freezesec=5 /randompos /time
 | run_complete / complete_ack | 마지막 값 |
 | export / export_cancel / results_clear | 파일 경로·행 수 |
 | exit / exit_cancel / app_exit | |
+| ui_begin / ui / ui_end | **화면 요소 위치 정답** — 창 표시·탭 전환·이동·크기 변경·표 스크롤 0.6초 뒤에 기록. `kind=종류;enabled=0/1;rect=x y w h(화면 좌표);text=글자`. 메뉴·툴바·탭·컨트롤·보이는 표 행 |
 
 GHOST 블랙박스(`events.jsonl`)와 대조하면 다음 지표를 계산할 수 있다:
 - 판독 정확도: `cycle_done.value` 와 GHOST `read` 값
 - 알람 탐지율: `alarm_raised` 와 GHOST 감시 `appeared`
 - 무인 수행 성공률: 시나리오 성공과 `run_complete`
+- 대상 찾기 정확도: GHOST 가 찾은 위치가 `ui` 의 rect 안에 드는지
 
 ## 빌드
 
