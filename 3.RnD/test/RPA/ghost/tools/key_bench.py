@@ -46,8 +46,7 @@ def cases():
     out.append(("special", ["menu"], ["esc"]))
     for k in ["num0", "num1", "num5", "num9", "num*", "num+", "num-", "num.", "num/", "numenter"]:
         out.append(("numpad", [k], None))
-    out.append(("korean", ["hangul"], ["hangul"]))
-    out.append(("korean", ["hanja"], ["esc"]))
+    out.append(("korean", ["hanja"], ["esc"]))            # 한/영은 입력기가 가로채므로 run_text 에서 입력 결과로 확인
     for k in ["a", "c", "v", "x", "z", "y", "s", "f", "home", "end"]:
         out.append(("ctrl", ["ctrl", k], ["esc"] if k in ("f", "s") else None))
     for k in ["left", "right", "home", "end", "1", "/", "a"]:
@@ -58,7 +57,7 @@ def cases():
         out.append(("alt", ["alt", k], ["esc", "esc"]))                       # 메뉴 열림 → 닫기
     out.append(("right_mods", ["rctrl", "c"], None))
     out.append(("right_mods", ["rshift", "a"], None))
-    out.append(("right_mods", ["ralt", "a"], ["esc"]))
+    # 오른쪽 Alt 는 한국어 Windows 에서 한/영 키 → run_text 에서 확인
     return out
 
 
@@ -126,20 +125,32 @@ class Bench:
         # 캡션 기준 값 영역 (GTB 소스의 배치: 캡션 x=12 → 값 x=150, 행마다 높이)
         cx, cy = cap.box[0], cap.box[1]
         dx = 138
-        self.reg = {"last": (cx + dx - 6, cy - 12, 720, 56), "held": (cx + dx - 6, cy + 50, 300, 46),
-                    "count": (cx + dx + 384, cy + 50, 220, 46), "input": (cx + dx, cy + 108, 700, 120),
+        self.reg = {"last": (cx + dx - 6, cy - 12, 720, 56), "held": (cx + dx - 6, cy + 50, 300, 40),
+                    "count": (cx + dx + 384, cy + 50, 220, 40), "input": (cx + dx, cy + 108, 700, 120),
                     "copy": (cx + dx, cy + 250, 300, 30), "paste": (cx + dx, cy + 290, 300, 30),
                     "clip": (cx + dx - 4, cy + 328, 720, 40)}
         cv2.imwrite(os.path.join(self.out, "keyboard_tab.png"), f)
         self.click_input()
 
+    def click_at(self, x, y):
+        self.dev.click(x, y)
+        self.dev.move_to(1880, 1040, verify=False)      # 커서가 글자를 가리면 OCR 이 'I'·숫자 오판
+
     def click_input(self):
         x, y, w, h = self.reg["input"]
-        self.dev.click(x + 200, y + 40)
+        self.click_at(x + 200, y + 40)
 
     def count(self, f):
-        t = re.sub(r"[^0-9]", "", self.read(f, "count").replace("O", "0").replace("o", "0"))
-        return int(t) if t else None
+        """COUNT 숫자 (한 자리 숫자도 놓치지 않게 다수결 판독)."""
+        text, agree, _ = self.ocr.read_vote(f, self.reg["count"])
+        t = re.sub(r"[^0-9]", "", text.replace("O", "0").replace("o", "0"))
+        return int(t) if t and agree >= 0.5 else None
+
+    def held(self, f):
+        """눌린 수식키 글자(C/S/A/W). '-' 한 글자는 OCR 이 못 읽으므로 글자가 없으면 '-'."""
+        t = self.read(f, "held").upper()
+        m = "".join(c for c in "CSAW" if c in t)
+        return m or "-"
 
     def run_keys(self):
         res = []
@@ -158,13 +169,13 @@ class Bench:
             raw = self.read(f, "last")
             got = parse_last(raw)
             n1 = self.count(f)
-            held = self.read(f, "held").strip() or "?"
+            held = self.held(f)
             r = {"group": group, "combo": "+".join(combo), "expect": exp, "got": got, "raw": raw,
                  "received": None if n0 is None or n1 is None else n1 - n0, "held": held}
             r["ok"] = {"received": r["received"] == 1,
                        "vk": bool(got) and got["vk"] == exp["vk"], "sc": bool(got) and got["sc"] == exp["sc"],
                        "ext": bool(got) and got["ext"] == exp["ext"], "mods": bool(got) and got["mods"] == exp["mods"],
-                       "released": held in ("-", "—", "_")}
+                       "released": held == "-"}
             r["pass"] = all(r["ok"].values())
             res.append(r)
             mark = "✓" if r["pass"] else "✗ " + ",".join(k for k, v in r["ok"].items() if not v)
@@ -183,23 +194,44 @@ class Bench:
         d, out = self.dev, []
         def check(name, ok, detail):
             out.append({"test": name, "pass": ok, "detail": detail})
-            print(f"  [clipboard] {name}: {'✓' if ok else '✗'} {detail}")
+            print(f"  [text] {name}: {'✓' if ok else '✗'} {detail}")
+            cv2.imwrite(os.path.join(self.out, f"text_{len(out):02d}.png"), self.dev.frame())
         x, y, w, h = self.reg["copy"]
-        d.click(x + 100, y + 14)
+        px, py, pw, ph = self.reg["paste"]
+        # 관찰: Ctrl+A 전체 선택 (Win7 기본 입력칸은 지원하지 않을 수 있음) — 먼저 클립보드를 다른 값으로
+        self.click_at(px + 100, py + 14)
+        d.press("home")
+        d.hotkey("shift", "end")
+        d.press("delete")
+        d.type_text("MARK-1")
+        d.press("home")
+        d.hotkey("shift", "end")
+        d.hotkey("ctrl", "c")
+        self.click_at(x + 100, y + 14)
         d.hotkey("ctrl", "a")
         d.hotkey("ctrl", "c")
         f = self.frame(0.8)
         clip = self.read(f, "clip")
-        check("Ctrl+A, Ctrl+C (읽기 전용 칸)", "GHOST-COPY-7319" in clip.replace(" ", ""), clip)
-        px, py, pw, ph = self.reg["paste"]
-        d.click(px + 100, py + 14)
-        d.hotkey("ctrl", "a")
+        out.append({"test": "관찰: 읽기 전용 칸에서 Ctrl+A 전체 선택", "pass": None,
+                    "detail": "동작함" if "GHOST-COPY-7319" in clip.replace(" ", "") else f"동작 안 함 (클립보드 {clip!r})"})
+        print("  [text] 관찰 Ctrl+A:", out[-1]["detail"])
+        self.click_at(x + 100, y + 14)
+        d.press("home")
+        d.hotkey("shift", "end")
+        d.hotkey("ctrl", "c")
+        f = self.frame(0.8)
+        clip = self.read(f, "clip")
+        check("Home → Shift+End 선택 → Ctrl+C (읽기 전용 칸)", "GHOST-COPY-7319" in clip.replace(" ", ""), clip)
+        self.click_at(px + 100, py + 14)
+        d.press("home")
+        d.hotkey("shift", "end")
         d.press("delete")
         d.hotkey("ctrl", "v")
         f = self.frame(0.6)
         pasted = self.read(f, "paste")
         check("Ctrl+V (붙여넣기)", "GHOST-COPY-7319" in pasted.replace(" ", ""), pasted)
-        d.hotkey("ctrl", "a")
+        d.press("home")
+        d.hotkey("shift", "end")
         d.hotkey("ctrl", "x")
         f = self.frame(0.6)
         after_cut, clip2 = self.read(f, "paste"), self.read(f, "clip")
@@ -209,7 +241,8 @@ class Bench:
         f = self.frame(0.6)
         undo = self.read(f, "paste")
         check("Ctrl+Z (되돌리기)", "GHOST-COPY-7319" in undo.replace(" ", ""), undo)
-        d.hotkey("ctrl", "a")
+        d.press("home")
+        d.hotkey("shift", "end")
         d.press("delete")
         d.type_text("Hello-GHOST_42")
         d.press("home")
@@ -218,6 +251,38 @@ class Bench:
         f = self.frame(0.8)
         clip3 = self.read(f, "clip")
         check("입력 → Shift+End 선택 → Ctrl+C", "Hello-GHOST_42".lower() in clip3.replace(" ", "").lower(), clip3)
+        # 한/영 전환: 입력기가 키를 가로채므로 입력 결과로 확인
+        for name, toggle in (("한/영 키", "hangul"), ("오른쪽 Alt (한국어 Windows 의 한/영)", "ralt")):
+            self.click_at(px + 100, py + 14)
+            d.press("home")
+            d.hotkey("shift", "end")
+            d.press("delete")
+            d.press(toggle)
+            time.sleep(0.4)
+            d.type_text("gksrmf")
+            f = self.frame(0.8)
+            ko = self.read(f, "paste")
+            d.press(toggle)
+            time.sleep(0.4)
+            d.type_text("abc")
+            f = self.frame(0.8)
+            back = self.read(f, "paste")
+            check(f"{name}: 전환 → 'gksrmf' = '한글' → 다시 전환 → 'abc'",
+                  "한글" in ko and back.replace(" ", "").endswith("abc"), f"한글 모드={ko!r} 영문 복귀={back!r}")
+        # GHOST 한글 입력 (type 에 한글: 입력기 전환 + 두벌식 순서) — 영문·숫자·기호 섞어서
+        for sample in ("GHOST 한글 입력 시험 123 OK", "LOT-7 재측정 요청 (온도 25도)"):
+            self.click_at(px + 100, py + 14)
+            d.press("home")
+            d.hotkey("shift", "end")
+            d.press("delete")
+            d.type_text(sample)
+            f = self.frame(0.8)
+            got = self.read(f, "paste")
+            d.type_text("x")                                  # 영문 모드로 돌아왔는지
+            f2 = self.frame(0.6)
+            tail = self.read(f2, "paste")
+            check(f"한글 입력: {sample!r}", got.replace(" ", "") == sample.replace(" ", "") and tail.rstrip().endswith("x"),
+                  f"화면={got!r}, 이어서 x → {tail[-6:]!r}")
         return out
 
     def close(self):
@@ -236,7 +301,7 @@ class Bench:
         try:
             self.launch()
             keys = self.run_keys()
-            clip = [] if self.a.only else self.run_clipboard()
+            clip = self.run_clipboard() if (not self.a.only or "text" in self.a.only) else []
             self.close()
         finally:
             self.dev.close()
@@ -248,7 +313,7 @@ class Bench:
             g[0] += r["pass"]
             g[1] += 1
         print("\n묶음별:", ", ".join(f"{g} {p}/{n}" for g, (p, n) in groups.items()))
-        print(f"전체 {sum(r['pass'] for r in keys)}/{len(keys)}, 클립보드 {sum(c['pass'] for c in clip)}/{len(clip)}")
+        print(f"전체 {sum(r['pass'] for r in keys)}/{len(keys)}, 글자·클립보드 {sum(1 for c in clip if c['pass'])}/{sum(1 for c in clip if c['pass'] is not None)}")
         print("결과:", self.out)
 
 

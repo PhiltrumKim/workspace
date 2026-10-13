@@ -29,7 +29,7 @@ def test_validate_errors(sim_objects):
     reg = Registry(sim_objects)
     errs = validate({"name": "x", "steps": [
         {"action": "click"}, {"action": "click", "target": "nope"}, {"action": "key", "key": "zz"},
-        {"action": "type", "text": "가"}, {"action": "fly"},
+        {"action": "type", "text": "é"}, {"action": "fly"},
         {"action": "click", "target": "nav_run", "expect": {"visible": "a", "gone": "b"}},
     ]}, reg)
     assert len(errs) == 6

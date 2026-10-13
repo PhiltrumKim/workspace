@@ -231,8 +231,10 @@ def validate(sc: dict, registry=None) -> List[str]:
                         _check_key(errs, where, k)
             if a == "type" and "text" in st:
                 try:
+                    from ..hal import hangul
                     for ch in re.sub(r"\$\{[^}]*\}", "", str(st["text"])):
-                        keymap.char_to_key(ch)
+                        if not hangul.is_hangul(ch):            # 한글은 입력기 전환으로 입력
+                            keymap.char_to_key(ch)
                 except ValueError as e:
                     errs.append(f"{where}: {e}")
             if a == "set":

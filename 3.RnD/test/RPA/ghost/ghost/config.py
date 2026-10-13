@@ -32,6 +32,9 @@ DEFAULTS = {
         "locate_window": 120,
         "max_blob": 56,             # 커서 흔적 덩어리 최대 크기(px). 아이콘 호버 하이라이트 등 큰 변화 배제
     },
+    # 한글 입력: 대상 PC 입력기의 한/영 전환 키. 키보드 종류가 '101 키보드 종류 3'(오른쪽 Alt = 한/영)이면 ralt,
+    # 한국어 103/106 키보드면 hangul. 입력 시작 시 대상 입력기는 영문 상태라고 가정하고, 끝나면 영문으로 되돌린다.
+    "keyboard": {"hangul_toggle": "ralt", "toggle_wait": 0.15},
     "timing": {
         "move_step": 0.01,          # 마우스 패킷 간 추가 대기
         "capture_latency": 0.2,     # 이동 → 캡처 영상 반영 지연 (Magewell 실측 ~0.16s; 0.15s 에서 이전 프레임 오측정 발생)

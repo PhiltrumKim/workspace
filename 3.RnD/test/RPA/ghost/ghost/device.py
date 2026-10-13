@@ -41,6 +41,7 @@ class Device:
                  log: Optional[Callable[[str], None]] = None):
         self.video = video
         self.hid = hid
+        self.cfg = cfg
         self.c = cfg["cursor"]
         self.t = cfg["timing"]
         self.log = log or (lambda msg: None)
@@ -349,12 +350,26 @@ class Device:
             self.key_up(n)
 
     def type_text(self, text: str) -> None:
-        plan = [keymap.char_to_key(ch) for ch in text]   # 입력 전에 전체 검증(부분 입력 방지)
-        for name, shift in plan:
-            if shift:
-                self.hotkey("shift", name)
-            else:
-                self.press(name)
+        """글자 입력. 한글은 대상 입력기를 한글 모드로 바꿔 두벌식 자판 순서로 치고 영문 모드로 되돌린다."""
+        from .hal import hangul
+        segs = hangul.segments(text) if any(hangul.is_hangul(c) for c in text) else [("en", text)]
+        plans = [(mode, [keymap.char_to_key(ch) for ch in keys]) for mode, keys in segs]   # 입력 전에 전체 검증
+        kb = self.cfg.get("keyboard", {})
+        toggle, wait = kb.get("hangul_toggle", "ralt"), kb.get("toggle_wait", 0.15)
+        mode = "en"
+        for want, plan in plans:
+            if want != mode:
+                self.press(toggle)
+                time.sleep(wait)
+                mode = want
+            for name, shift in plan:
+                if shift:
+                    self.hotkey("shift", name)
+                else:
+                    self.press(name)
+        if mode != "en":
+            self.press(toggle)
+            time.sleep(wait)
 
     def release_all_keys(self) -> None:
         """눌린 채 남은 수식키 해제 (C++ 키클리어와 같은 목적)."""

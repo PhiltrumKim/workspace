@@ -59,3 +59,24 @@ def test_validate_drag_scroll():
         {"action": "drag", "x": 1, "y": 2, "to": [1]}, {"action": "scroll_to", "target": {"text": "a"}, "direction": "left"},
     ]})
     assert len(errs) == 5, errs
+
+
+def test_hangul_keys_and_segments():
+    from ghost.hal import hangul
+    assert "".join(hangul.to_keys(c) for c in "한글") == "gksrmf"
+    assert hangul.to_keys("값") == "rkqt" and hangul.to_keys("뷁") == "qnpfr" and hangul.to_keys("ㅘ") == "hk"
+    assert hangul.segments("LOT 한글 메모 123 OK") == [("en", "LOT "), ("ko", "gksrmf apah 123 "), ("en", "OK")]
+
+
+def test_type_hangul_toggles_ime(cfg):
+    """한글이 섞이면 한/영 전환 키로 감싸서 두벌식 순서로 치고, 끝에 영문으로 되돌린다."""
+    from ghost.hal import keymap
+    from ghost.sim import DemoEquipmentApp, SimWorld
+    w = SimWorld(DemoEquipmentApp(), offset=(OFF, OFF))
+    d = build_device(cfg, sim=True, world=w)
+    d.type_text("A 한")
+    ralt = keymap.key("ralt")
+    downs = [p for p in w.packets if p[4] == 0xFC and not (p[7] & 0x01)]         # 키 누름 패킷
+    vks = [p[6] for p in downs]
+    assert vks.count(ralt.vk) == 2                                                # 한글 앞뒤 전환
+    assert vks[-1] == ralt.vk and keymap.key("g").vk in vks and keymap.key("k").vk in vks
