@@ -36,6 +36,7 @@ GTB3000.exe.config   런타임 선택: XP/7 은 .NET 3.5, 10/11 은 .NET 3.5 가
 | Results: 결과 표 (OK/NG 색) + CSV 저장 창 | 여러 값 판독, Windows 저장 대화상자 |
 | Alarm Log | 알람 기록 판독 |
 | Settings | 실행 중 난이도 변경 |
+| Complex UI (`/tab=6`) | 복잡한 UI 시험: 40항목 드롭다운, 접힌 트리, 슬라이더, 표 셀, 탭 안의 탭, 우클릭 메뉴, 글자 없는 웨이퍼 맵(A~M × 1~13), 마우스를 올려야 나타나는 버튼. 메뉴 Analysis > Wafer > Map Export > CSV (3단계). 결과는 맨 위 LAST EVENT 와 정답 로그 |
 | Keyboard (`/tab=5`) | 조합키 시험: 앱이 받은 모든 키(가상키·스캔코드·확장키·수식키)를 화면(LAST KEY·COUNT·HELD)과 정답 로그(`key`)에 기록. 복사 원본·붙여넣기 칸·클립보드 표시 |
 
 시작 조건이 맞지 않으면 시작을 거부하고 이유를 띄운다 (레시피 미로드, LOT 미입력, 파라미터 미적용).

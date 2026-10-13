@@ -1,0 +1,69 @@
+{
+  "ghost": 1,
+  "name": "gtb_complex_ui",
+  "description": "복잡한 UI 시험 (GTB-3000 Complex UI 탭): 긴 드롭다운·트리·3단계 메뉴·슬라이더·표 셀·탭 안의 탭·우클릭 메뉴·글자 없는 웨이퍼 맵·숨은 버튼. 각 조작은 화면 맨 위 LAST EVENT 로 확인",
+  "params": {
+    "chamber": { "default": "Chamber-27", "description": "드롭다운에서 고를 항목" },
+    "gain": { "default": "73", "description": "슬라이더 목표 값" },
+    "die_col": { "default": "H", "description": "웨이퍼 맵 열 글자 (A~M)" },
+    "die_row": { "default": "5", "description": "웨이퍼 맵 행 숫자 (1~13)" }
+  },
+  "on_abort": "gtb_close",
+  "steps": [
+    { "action": "hotkey", "keys": ["win", "r"], "label": "실행 창", "expect": { "visible": "run_prompt", "timeout": 3 }, "retry": 1 },
+    { "action": "key", "key": "home" },
+    { "action": "hotkey", "keys": ["shift", "end"] },
+    { "action": "type", "text": "%USERPROFILE%\\Desktop\\dist\\GTB3000.exe /user=operator /seed=1 /tab=6" },
+    { "action": "key", "key": "enter", "label": "GTB-3000 실행 (Complex UI 탭)" },
+    { "action": "wait_for", "target": { "text": "EVT", "region": [270, 180, 400, 60] }, "timeout": 20 },
+
+    { "action": "select", "x": 524, "y": 258, "item": "${chamber}", "list": [400, 265, 280, 560], "check": [410, 242, 230, 34],
+      "label": "긴 드롭다운에서 고르기 (스크롤 필요)" },
+    { "action": "expect", "target": { "text": "combo ${chamber}", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "click", "target": { "text": "Fab-1", "region": [280, 310, 350, 300] }, "label": "트리: 항목 선택 후 → 키로 펼치기 (다시 눌러도 접히지 않음)" },
+    { "action": "key", "key": "right",
+      "expect": { "visible": { "text": "Bay-B", "region": [280, 310, 350, 300] }, "timeout": 3 }, "retry": 1 },
+    { "action": "click", "target": { "text": "Bay-B", "region": [280, 310, 350, 300] } },
+    { "action": "key", "key": "right",
+      "expect": { "visible": { "text": "Tool-B2", "region": [280, 310, 350, 300] }, "timeout": 3 }, "retry": 1 },
+    { "action": "click", "target": { "text": "Tool-B2", "region": [280, 310, 350, 300] } },
+    { "action": "key", "key": "right",
+      "expect": { "visible": { "text": "CH-B2-3", "region": [280, 310, 350, 300] }, "timeout": 3 }, "retry": 1 },
+    { "action": "click", "target": { "text": "CH-B2-3", "region": [280, 310, 350, 300] } },
+    { "action": "expect", "target": { "text": "tree Fab-1>Bay-B>Tool-B2>CH-B2-3", "region": [270, 180, 1360, 60] }, "timeout": 3,
+      "label": "트리 경로 선택 확인" },
+
+    { "action": "menu", "path": ["Analysis", "Wafer", "Map Export", "CSV"], "bar": [270, 100, 800, 40], "label": "3단계 메뉴" },
+    { "action": "expect", "target": { "text": "menu Analysis>Wafer>Map Export>CSV", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "adjust", "x": 884, "y": 248, "value": "${gain}", "read": { "region": [1066, 236, 220, 44] },
+      "inc": "right", "dec": "left", "label": "슬라이더를 읽어 가며 맞추기" },
+    { "action": "expect", "target": { "text": "slider ${gain}", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "click", "x_of": { "text": "Thickness", "match": "exact", "region": [640, 290, 580, 34] },
+      "y_of": { "text": "W05", "match": "exact", "region": [640, 320, 130, 210] }, "label": "표 셀 (열 머리글 × 행)" },
+    { "action": "expect", "target": { "text": "cell W05/Thickness=", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "click", "target": { "text": "Sub B", "region": [640, 540, 580, 40] }, "label": "탭 안의 탭" },
+    { "action": "click", "target": { "text": "Enable Auto Recovery", "region": [640, 570, 580, 120] } },
+    { "action": "expect", "target": { "text": "check Enable Auto Recovery=1", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "right_click", "target": { "text": "Slot 07", "region": [280, 640, 350, 220] },
+      "expect": { "visible": { "text": "Exclude" }, "timeout": 4 }, "label": "우클릭 메뉴" },
+    { "action": "click", "target": { "text": "Exclude" } },
+    { "action": "expect", "target": { "text": "context Exclude Slot 07", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "click", "x_of": { "text": "${die_col}", "region": [1250, 236, 360, 34] },
+      "y_of": { "text": "${die_row}", "match": "exact", "region": [1224, 270, 34, 350], "scale": 3 }, "label": "웨이퍼 맵 칸 (열 글자 × 행 숫자)" },
+    { "action": "expect", "target": { "text": "die ${die_col}${die_row}", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "move", "target": { "text": "HOVER ZONE", "region": [1220, 670, 400, 40] }, "label": "숨은 버튼 구역으로" },
+    { "action": "move", "x": 1300, "y": 740 },
+    { "action": "click", "target": { "text": "Hidden Action", "region": [1220, 700, 400, 80] }, "timeout": 3, "label": "올리면 나타나는 버튼" },
+    { "action": "expect", "target": { "text": "button Hidden Action", "region": [270, 180, 1360, 60] }, "timeout": 3 },
+
+    { "action": "screenshot", "label": "complex_done" },
+    { "action": "call", "scenario": "gtb_close", "label": "종료" }
+  ]
+}

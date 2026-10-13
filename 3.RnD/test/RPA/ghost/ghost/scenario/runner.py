@@ -230,6 +230,83 @@ class Runner:
                 raise StepFailed(f"{tdesc(target)} {state} ({timeout}s)")
             time.sleep(self.cfg["timing"]["poll"])
 
+    # ------------------------------------------------------------ 부품 단위 동작
+    def _text_box(self, text: str, region, timeout: float = 3.0):
+        """region 안에서 글자(완전 일치 우선) 찾기 → Match."""
+        return self.wait_for({"text": text, "match": "exact", "region": [int(v) for v in region]}, timeout)
+
+    def _select(self, st: dict) -> str:
+        """드롭다운: 펼치기 → 항목이 보일 때까지 스크롤 → 클릭 → 선택값 확인."""
+        (cx, cy), where = self._point(st)
+        item = str(st["item"])
+        lst = st.get("list") or [cx - 160, cy + 10, 420, 700]       # 펼친 목록 영역 (기본: 상자 아래, 긴 목록 대비)
+        self.dev.click(cx, cy)
+        self._sleep(0.4)
+        target = {"text": item, "match": "exact", "region": [int(v) for v in lst]}
+        notch = -1 if st.get("direction", "down") == "down" else 1
+        found = None
+        for i in range(int(st.get("max", 15)) + 1):
+            try:
+                found = self.wait_for(target, 0.6)
+                break
+            except StepFailed:
+                if i == int(st.get("max", 15)):
+                    break
+                self.dev.scroll(notch * int(st.get("step", 2)), lst[0] + lst[2] // 2, lst[1] + lst[3] // 2)
+        if found is None:
+            self.dev.press("esc")
+            raise StepFailed(f"목록에서 '{item}' 를 찾지 못함")
+        self.dev.click(*found.center)
+        check = st.get("check") or [cx - 160, cy - 20, 360, 40]
+        self._text_box(item, check, float(st.get("timeout", 3.0)))
+        return f"{where} → '{item}' 선택 확인"
+
+    def _menu(self, st: dict) -> str:
+        """메뉴 경로: 단계마다 글자로 찾아 누르고, 다음 단계는 직전 항목 오른쪽·아래에서 찾는다."""
+        path = [str(p) for p in st["path"]]
+        region = st.get("bar")                                      # 첫 단계 찾을 영역 (없으면 화면 전체)
+        prev = None
+        done = []
+        for i, name in enumerate(path):
+            if prev is not None:
+                x, y, w, h = prev.box
+                region = [x - 10, y - 30, 700, 500] if i > 1 else [x - 40, y, 600, 500]   # 첫 하위 메뉴는 아래로 펼쳐짐
+            try:
+                m = self.wait_for({"text": name, "match": st.get("match", "contains"),          # 메뉴 줄은 한 덩어리로 읽힐 수 있음 → 포함 + 위치 좁히기
+                                   **({"region": [int(v) for v in region]} if region else {})},
+                                  float(st.get("timeout", 3.0)))
+            except StepFailed:
+                self.dev.press("esc"); self.dev.press("esc"); self.dev.press("esc")
+                raise StepFailed(f"메뉴 '{' > '.join(done + [name])}' 를 찾지 못함")
+            self.dev.click(*m.center)
+            self._sleep(0.35)
+            prev = m
+            done.append(name)
+        return " > ".join(done)
+
+    def _adjust(self, st: dict) -> str:
+        """값 맞추기: 컨트롤을 누른 뒤 값을 읽어 가며 키(inc/dec)로 목표까지 (슬라이더·스핀 박스)."""
+        (x, y), where = self._point(st)
+        self.dev.click(x, y)
+        want = float(st["value"])
+        rd = st["read"]
+        pat = rd.get("pattern", r"(-?\d+(?:\.\d+)?)")
+        inc, dec, unit = st.get("inc", "right"), st.get("dec", "left"), float(st.get("unit", 1))
+        cur = None
+        for _ in range(int(st.get("rounds", 6))):
+            self._sleep(0.3)
+            raw = " ".join(h.text for h in self.loc.ocr.read(self.dev.frame(), rd["region"], line=rd.get("line")))
+            mt = re.search(pat, raw.replace(",", ""))
+            if not mt:
+                raise StepFailed(f"값을 읽지 못함: {raw!r}")
+            cur = float(mt.group(1) if mt.groups() else mt.group(0))
+            diff = round((want - cur) / unit)
+            if diff == 0:
+                return f"{where}: {cur:g} (목표 {want:g})"
+            for _ in range(min(abs(diff), int(st.get("max_keys", 200)))):
+                self.dev.press(inc if diff > 0 else dec)
+        raise StepFailed(f"목표 {want:g} 에 맞추지 못함 (현재 {cur})")
+
     def _scroll_to(self, st: dict) -> str:
         """target 이 보일 때까지 휠을 굴린다. at: 굴릴 위치(목록 위). 없으면 처음 커서 위치."""
         t = st["target"]
@@ -253,6 +330,12 @@ class Runner:
         raise StepFailed(f"{tdesc(t)}: {st.get('max', 15)}번 스크롤해도 안 보임")
 
     def _point(self, st: dict) -> Tuple[Tuple[int, int], str]:
+        if "x_of" in st and "y_of" in st:
+            mx = self.wait_for(st["x_of"], st.get("timeout", 3.0))
+            my = self.wait_for(st["y_of"], st.get("timeout", 3.0))
+            ox, oy = st.get("offset", (0, 0))
+            x, y = mx.center[0] + int(ox), my.center[1] + int(oy)
+            return (x, y), f"{tdesc(st['x_of'])}×{tdesc(st['y_of'])}@({x},{y})"
         if "target" not in st:
             return (int(st["x"]), int(st["y"])), f"({st['x']},{st['y']})"
         t = st["target"]
@@ -510,6 +593,12 @@ class Runner:
             return f"{src} → {dst}"
         if a == "scroll_to":
             return self._scroll_to(st)
+        if a == "select":
+            return self._select(st)
+        if a == "menu":
+            return self._menu(st)
+        if a == "adjust":
+            return self._adjust(st)
         if a == "key":
             d.press(st["key"])
             return f"key {st['key']}"

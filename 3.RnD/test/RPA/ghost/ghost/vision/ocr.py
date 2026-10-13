@@ -54,6 +54,10 @@ class TextHit:
         return (x + w // 2, y + h // 2)
 
 
+# OCR 이 자주 헷갈리는 글자: 비교할 때 양쪽을 같은 글자로 바꾼다 (GTB-3000 트리 'Tool-B2' → 'T001-B2' 로 읽음)
+_CONFUSABLE = str.maketrans({"o": "0", "l": "1", "|": "1"})
+
+
 def normalize(s: str) -> str:
     """비교용 정규화: 공백 제거, 대소문자 무시, 대시/콜론 변형 통일."""
     s = s.casefold()
@@ -62,10 +66,15 @@ def normalize(s: str) -> str:
     return re.sub(r"\s+", "", s)
 
 
+def _fold(s: str) -> str:
+    """찾기 비교용: normalize + OCR 혼동 글자(o↔0, l·I↔1) 통일. 길이는 그대로."""
+    return normalize(s).translate(_CONFUSABLE)
+
+
 def text_matches(text: str, query: str, mode: str = "contains", min_ratio: float = 0.9) -> bool:
     if mode == "regex":                       # OCR 이 넣는 공백(좁은 글자 '1' 앞 등)에 영향받지 않도록 공백 제거본도 비교
         return re.search(query, text) is not None or re.search(query, re.sub(r"\s+", "", text)) is not None
-    t, q = normalize(text), normalize(query)
+    t, q = _fold(text), _fold(query)
     if mode == "exact":
         return t == q
     if mode == "contains":
@@ -122,7 +131,8 @@ class OcrEngine:
             if img.size == 0:
                 return []
             if line is None:
-                line = region is not None and img.shape[0] <= LINE_AUTO_MAX_H
+                # 짧은 한 줄 영역만 (넓고 낮은 영역, 예: 메뉴 줄 전체를 한 줄로 읽으면 글자가 망가짐 — GTB-3000 Analysis → nalsig)
+                line = region is not None and img.shape[0] <= LINE_AUTO_MAX_H and img.shape[1] <= 12 * img.shape[0]
             if line:
                 (tx, ty, tw, th) = _ink_box(img)          # 영역 안 글자 부분만 (빈 공간이 많으면 인식률 저하)
                 img = img[ty:ty + th, tx:tx + tw]
@@ -198,8 +208,8 @@ class OcrEngine:
 def _span(text: str, query: str) -> Optional[Tuple[int, int]]:
     """text 안에서 query 가 차지하는 원문 글자 범위 (공백·대소문자 무시)."""
     keep = [(i, c) for i, c in enumerate(text) if not c.isspace()]
-    flat = normalize("".join(c for _, c in keep))
-    q = normalize(query)
+    flat = _fold("".join(c for _, c in keep))
+    q = _fold(query)
     if not q or len(flat) != len(keep):
         return None
     k = flat.find(q)
@@ -213,7 +223,7 @@ def narrow(hit: TextHit, query: str, mode: str = "contains", min_ratio: float = 
     GTB-3000 측정: 탭 줄 'Recipe Run Monitor Results ...' 를 한 덩어리로 읽으면 가운데(엉뚱한 탭)를 눌렀음.
       1) 묶인 줄이면 query 를 담는 가장 짧은 연속 단어 묶음
       2) 한 덩어리 안에 다른 글자가 섞여 있으면 글자 위치 비율로 가로 범위를 좁힘"""
-    if mode in ("exact", "regex") or normalize(hit.text) == normalize(query):
+    if mode in ("exact", "regex") or _fold(hit.text) == _fold(query):
         return hit
     h = hit
     if hit.parts:

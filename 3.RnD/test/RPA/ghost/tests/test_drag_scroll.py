@@ -80,3 +80,24 @@ def test_type_hangul_toggles_ime(cfg):
     vks = [p[6] for p in downs]
     assert vks.count(ralt.vk) == 2                                                # 한글 앞뒤 전환
     assert vks[-1] == ralt.vk and keymap.key("g").vk in vks and keymap.key("k").vk in vks
+
+
+def test_cross_point_click_and_component_validation(cfg):
+    """교차점 클릭: x 는 x_of 대상, y 는 y_of 대상의 중심 (표 셀·웨이퍼 맵 칸)."""
+    r, w = _runner(cfg)
+    sc = {"ghost": 1, "name": "cross", "steps": [
+        {"action": "click", "target": "nav_log"},
+        {"action": "move", "x_of": "nav_run", "y_of": "nav_log"},
+    ]}
+    assert validate(sc, r.reg) == []
+    res = r.run(sc)
+    assert res.ok, [(s.desc, s.message) for s in res.steps if not s.ok]
+    run_c = w.app.widgets()["nav_run"]
+    log_c = w.app.widgets()["nav_log"]
+    assert abs(r.dev.pos[0] - (run_c[0] + run_c[2] // 2 + OFF)) <= 6
+    assert abs(r.dev.pos[1] - (log_c[1] + log_c[3] // 2 + OFF)) <= 6
+    errs = validate({"name": "x", "steps": [
+        {"action": "click", "x_of": "nav_run"}, {"action": "menu", "path": "File"}, {"action": "select", "x": 1, "y": 2},
+        {"action": "adjust", "x": 1, "y": 2, "value": 3, "read": {"region": [1, 2]}},
+    ]}, r.reg)
+    assert len(errs) == 4, errs

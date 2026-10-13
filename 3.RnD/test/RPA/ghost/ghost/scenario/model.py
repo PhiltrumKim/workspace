@@ -54,6 +54,8 @@ REQUIRED = {
     "screenshot": [], "call": ["scenario"], "home": [], "read": [],
     # 휠·드래그
     "scroll": ["amount"], "drag": ["to"], "scroll_to": ["target"],
+    # 부품 단위
+    "select": ["item"], "menu": ["path"], "adjust": ["read", "value"],
     # 제어 구조
     "set": ["name"], "if": ["cond"], "repeat": ["times", "steps"], "for_each": ["items", "steps"],
     "while": ["cond", "steps"], "break": [], "continue": [], "fail": [],
@@ -177,11 +179,23 @@ def validate(sc: dict, registry=None) -> List[str]:
                     errs.append(f"{where} {a}: '{f}' 필요")
             plain = {k: v for k, v in st.items() if k not in ("steps", "then", "else", "cond")}
             used.extend((where, n) for n in var_refs(plain))
-            if a in POINTER:
+            if a in POINTER or a in ("select", "adjust"):
                 if "target" in st:
                     check_target(where, st["target"])
+                elif "x_of" in st or "y_of" in st:
+                    if not ("x_of" in st and "y_of" in st):
+                        errs.append(f"{where} {a}: 교차점 클릭은 x_of 와 y_of 둘 다 필요")
+                    for k in ("x_of", "y_of"):
+                        if k in st:
+                            check_target(where, st[k])
                 elif not ("x" in st and "y" in st):
-                    errs.append(f"{where} {a}: target 또는 x,y 필요")
+                    errs.append(f"{where} {a}: target 또는 x,y (또는 x_of+y_of) 필요")
+            if a == "menu":
+                if not isinstance(st.get("path"), list) or len(st.get("path") or []) < 1:
+                    errs.append(f"{where} menu: path 는 메뉴 글자 목록 (예: [\"File\", \"Export\"])")
+            if a == "adjust":
+                if not isinstance(st.get("read"), dict) or len(st["read"].get("region", [])) != 4:
+                    errs.append(f"{where} adjust: read 는 {{\"region\": [x,y,w,h], \"pattern\": ...}}")
             if a in ("wait_for", "wait_gone", "expect", "scroll_to") and "target" in st:
                 check_target(where, st["target"])
             if a == "scroll":
@@ -370,6 +384,12 @@ def describe(st: dict) -> str:
         return f"drag {src} → {tuple(to) if isinstance(to, list) else _t(to)}{lab}"
     if a == "scroll_to":
         return f"scroll_to {_t(st['target'])} ({st.get('direction', 'down')}){lab}"
+    if a == "select":
+        return f"select {st['item']!r}{lab}"
+    if a == "menu":
+        return f"menu {' > '.join(map(str, st['path']))}{lab}"
+    if a == "adjust":
+        return f"adjust → {st['value']}{lab}"
     if a == "call":
         return f"call ▷ {st['scenario']}{lab}"
     if a == "read":

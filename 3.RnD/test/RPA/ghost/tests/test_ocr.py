@@ -147,3 +147,10 @@ def test_narrow_to_matched_words():
     c = narrow(one, "Results").center
     assert 190 < c[0] < 260
     assert narrow(one, "Recipe Run Monitor Results") is one
+
+
+def test_confusable_chars_match():
+    """OCR 이 o↔0, l↔1 을 헷갈려도 찾는다 (GTB-3000 'Tool-B2' → 'T001-B2')."""
+    from ghost.vision.ocr import text_matches
+    assert text_matches("T001-B2", "Tool-B2") and text_matches("+ Fab-l", "Fab-1", "contains")
+    assert text_matches("CH-B2-3", "CH-B2-3", "exact") and not text_matches("Tool-B3", "Tool-B2")
