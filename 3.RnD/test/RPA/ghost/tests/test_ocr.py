@@ -154,3 +154,16 @@ def test_confusable_chars_match():
     from ghost.vision.ocr import text_matches
     assert text_matches("T001-B2", "Tool-B2") and text_matches("+ Fab-l", "Fab-1", "contains")
     assert text_matches("CH-B2-3", "CH-B2-3", "exact") and not text_matches("Tool-B3", "Tool-B2")
+
+
+def test_axis_interpolates_missing_labels():
+    """웨이퍼 맵 축: 일부 라벨을 못 읽어도(작은 한 글자) 읽힌 라벨로 직선을 맞춰 위치를 추정."""
+    from ghost.vision.ocr import TextHit, axis_labels, axis_locate
+    rows = [TextHit(str(i), (1232, 285 + 26 * (i - 1), 9, 15), 0.9) for i in (4, 6, 8, 10, 11, 12, 13)]
+    rows.append(TextHit("7", (1232, 900, 9, 15), 0.9))                 # 잘못 읽은 라벨 하나 (엉뚱한 위치)
+    (x, y), ratio, direct = axis_locate(rows, axis_labels("1-13"), "5", "v")
+    assert direct == 0 and abs(y - (285 + 26 * 4 + 7)) <= 3 and ratio > 0.5
+    cols = [TextHit("A B C D E F G H I J K L M", (1268, 250, 338, 20), 0.9)]   # 한 줄로 읽힌 경우
+    (x, y), ratio, direct = axis_locate(cols, axis_labels("A-M"), "H", "h")
+    assert direct == 1 and abs(x - (1268 + 26 * 7 + 13)) <= 8
+    assert axis_labels(["X", "Y"]) == ["X", "Y"] and axis_locate([], axis_labels("1-3"), "2", "v") is None

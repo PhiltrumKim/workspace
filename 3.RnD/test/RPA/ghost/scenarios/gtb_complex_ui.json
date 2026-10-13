@@ -54,8 +54,8 @@
     { "action": "click", "target": { "text": "Exclude" } },
     { "action": "expect", "target": { "text": "context Exclude Slot 07", "region": [270, 180, 1360, 60] }, "timeout": 3 },
 
-    { "action": "click", "x_of": { "text": "${die_col}", "region": [1250, 236, 360, 34] },
-      "y_of": { "text": "${die_row}", "match": "exact", "region": [1224, 270, 34, 350], "scale": 3 }, "label": "웨이퍼 맵 칸 (열 글자 × 행 숫자)" },
+    { "action": "click", "x_of": { "text": "${die_col}", "axis": "A-M", "region": [1250, 236, 360, 34] },
+      "y_of": { "text": "${die_row}", "axis": "1-13", "region": [1224, 270, 34, 350] }, "label": "웨이퍼 맵 칸 (열 글자 × 행 숫자)" },
     { "action": "expect", "target": { "text": "die ${die_col}${die_row}", "region": [270, 180, 1360, 60] }, "timeout": 3 },
 
     { "action": "move", "target": { "text": "HOVER ZONE", "region": [1220, 670, 400, 40] }, "label": "숨은 버튼 구역으로" },

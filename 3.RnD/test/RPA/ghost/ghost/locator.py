@@ -7,6 +7,7 @@ target 지정 방법
    "match": "contains", "scale": 2,             match: exact | contains(기본) | regex | fuzzy
    "line": true,                                line: 영역을 한 줄로 바로 인식 (좁은 버튼·수치창, 생략 시 높이≤40 자동)
    "vote": true,                                vote: 다수결 판독 결과로 비교 (세그먼트 숫자 표시창)
+   "axis": "1-13",                              axis: 축 라벨(웨이퍼 맵 A~M·1~13 등) — 읽힌 라벨로 못 읽은 라벨 위치도 추정
    "anchor": "dlg_title", "offset": [dx,dy,w,h]} anchor: 다른 target(보통 빠른 템플릿)을 먼저 찾고 그 좌상단 기준
                                                 상대 영역에서만 OCR — 위치가 바뀌는 대화상자도 작은 영역 OCR 로 빠르게
 
@@ -66,6 +67,22 @@ class Locator:
             return self.validate(target["anchor"])
         return None
 
+    def _axis(self, spec: dict, frame: np.ndarray, region) -> Optional[Match]:
+        """축 라벨 대상: {"text": "5", "axis": "1-13", "region": [...]} — 읽힌 라벨로 못 읽은 라벨 위치까지 추정."""
+        from .vision.ocr import axis_labels, axis_locate
+        if region is None:
+            raise ValueError("axis 대상은 region 필요")
+        x, y, w, h = region
+        orient = spec.get("orient") or ("h" if w >= h else "v")
+        hits = self.ocr.read(frame, region, scale=spec.get("scale"), line=spec.get("line"))
+        r = axis_locate(hits, axis_labels(spec["axis"]), str(spec["text"]), orient)
+        if r is None:
+            return None
+        (px, py), ratio, direct = r
+        if ratio < spec.get("min_found", 0.3):
+            return None
+        return Match((px - 4, py - 4, 9, 9), round(ratio if not direct else max(ratio, 0.9), 3))
+
     def locate(self, target: Target, frame: np.ndarray, **overrides) -> Optional[Match]:
         spec = {**self.spec(target), **{k: v for k, v in overrides.items() if v is not None}}
         region = tuple(spec["region"]) if spec.get("region") else None
@@ -75,6 +92,8 @@ class Locator:
                 return None
             dx, dy, w, h = spec["offset"]
             region = (a.box[0] + dx, a.box[1] + dy, w, h)
+        if is_text_spec(spec) and spec.get("axis"):
+            return self._axis(spec, frame, region)
         if is_text_spec(spec):
             if region is None and not getattr(self, "_warned", {}).get(str(target)):
                 self._warned = {**getattr(self, "_warned", {}), str(target): True}

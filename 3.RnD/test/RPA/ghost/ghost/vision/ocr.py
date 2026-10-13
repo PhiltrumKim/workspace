@@ -295,3 +295,53 @@ def _ink_box(img: np.ndarray, pad: int = 6, diff: int = 40) -> Tuple[int, int, i
     x0, y0 = max(0, xs.min() - pad), max(0, ys.min() - pad)
     x1, y1 = min(w, xs.max() + 1 + pad), min(h, ys.max() + 1 + pad)
     return (int(x0), int(y0), int(x1 - x0), int(y1 - y0))
+
+
+# ------------------------------------------------------------------ 축 라벨 (웨이퍼 맵 A~M, 1~13 등)
+def axis_labels(spec) -> List[str]:
+    """"A-M" / "1-13" / ["A", "B", ...] → 라벨 목록."""
+    if isinstance(spec, (list, tuple)):
+        return [str(s) for s in spec]
+    a, _, b = str(spec).partition("-")
+    if a.isdigit() and b.isdigit():
+        return [str(i) for i in range(int(a), int(b) + 1)]
+    if len(a) == 1 and len(b) == 1:
+        return [chr(c) for c in range(ord(a), ord(b) + 1)]
+    raise ValueError(f"축 라벨 형식: 'A-M', '1-13' 또는 목록 ({spec!r})")
+
+
+def axis_locate(hits: List[TextHit], labels: List[str], want: str, orient: str) -> Optional[Tuple[Tuple[int, int], float, int]]:
+    """축 라벨 중 want 의 위치. 읽힌 라벨들로 '위치 = a + b × 순번' 직선을 맞춰, 못 읽은 라벨도 추정한다.
+    한 덩어리로 읽힌 결과('A B C ... M')는 글자 위치 비율로 나눈다. 반환: ((x, y), 읽힌 비율, 직접 읽었으면 1/추정이면 0)."""
+    idx = {_fold(l): i for i, l in enumerate(labels)}
+    pts = {}                                             # 순번 → (주축 좌표, 보조축 좌표)
+    for h in hits:
+        x, y, w, hh = h.box
+        toks = [(m.start(), m.end(), m.group()) for m in re.finditer(r"\S+", h.text)]
+        n = max(1, len(h.text))
+        for s, e, t in toks:
+            i = idx.get(_fold(t))
+            if i is None:
+                continue
+            if orient == "h":
+                main = x + w * (s + e) / 2 / n if len(toks) > 1 else x + w / 2
+                pts.setdefault(i, (main, y + hh / 2))
+            else:
+                main = y + hh * (s + e) / 2 / n if len(toks) > 1 else y + hh / 2
+                pts.setdefault(i, (main, x + w / 2))
+    want_i = idx.get(_fold(want))
+    if want_i is None or not pts:
+        return None
+    other = float(np.median([p[1] for p in pts.values()]))
+    if want_i in pts:
+        main, direct = pts[want_i][0], 1
+    else:
+        if len(pts) < 2:
+            return None
+        ks = sorted(pts)
+        slopes = [(pts[b][0] - pts[a][0]) / (b - a) for i, a in enumerate(ks) for b in ks[i + 1:]]
+        slope = float(np.median(slopes))                 # 잘못 읽은 라벨 하나에 흔들리지 않게 (중앙값 기울기)
+        inter = float(np.median([pts[k][0] - slope * k for k in ks]))
+        main, direct = inter + slope * want_i, 0
+    pt = (int(round(main)), int(round(other))) if orient == "h" else (int(round(other)), int(round(main)))
+    return pt, round(len(pts) / len(labels), 3), direct
