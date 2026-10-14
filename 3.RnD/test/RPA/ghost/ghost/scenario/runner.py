@@ -350,7 +350,7 @@ class Runner:
                 hx, hy = rec["hint"]
                 return (int(hx), int(hy)), f"{tdesc(t)} 힌트좌표({hx},{hy}) — 미검출"
             raise
-        ox, oy = rec.get("click_offset", (0, 0))
+        ox, oy = st.get("offset") or rec.get("click_offset", (0, 0))     # offset: 대상 중심에서 떨어진 곳 (글자 옆 입력칸 등)
         cx, cy = m.center
         return (cx + ox, cy + oy), f"{tdesc(t)}@({cx + ox},{cy + oy}) score={m.score}"
 

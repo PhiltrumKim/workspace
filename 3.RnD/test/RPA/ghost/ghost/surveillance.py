@@ -31,7 +31,7 @@ import numpy as np
 
 from .locator import Locator, describe
 
-TYPES = {"target", "no_signal", "frozen"}
+TYPES = {"target", "no_signal", "frozen", "color"}
 ACTIONS = {"notify", "stop", "handler"}
 SEVERITY = {"info": 0, "warning": 1, "critical": 2}
 
@@ -71,6 +71,8 @@ def validate_rules(rules: List[dict], registry=None) -> List[str]:
                 e = loc.validate(r["target"])
                 if e:
                     errs.append(f"{w}: {e}")
+        if t == "color" and not (isinstance(r.get("bgr"), list) and len(r["bgr"]) == 3):
+            errs.append(f"{w}: color 는 bgr [B, G, R] 필요")
         if t == "frozen" and not (r.get("region") and r.get("seconds")):
             errs.append(f"{w}: frozen 은 region, seconds 필요")
         a = r.get("action", "notify")
@@ -112,6 +114,26 @@ class Surveillance:
             m = self.loc.locate(r["target"], frame, region=r.get("region"), threshold=r.get("threshold"),
                                 color_tol=r.get("color_tol"))
             return (m is not None), (f"{describe(r['target'])}@{m.center} score={m.score}" if m else "")
+        if t == "color":
+            # 특정 색 덩어리 (알람 창의 빨간 머리글 등): 스타일·글자와 무관하고 빠름 (OCR 없이 매 감시 주기)
+            img = frame
+            ox = oy = 0
+            if r.get("region"):
+                x, y, w, h = r["region"]
+                img, ox, oy = frame[y:y + h, x:x + w], x, y
+            tol = int(r.get("tol", 40))
+            b, g, rr = r["bgr"]
+            lo = np.array([max(0, b - tol), max(0, g - tol), max(0, rr - tol)], np.uint8)
+            hi = np.array([min(255, b + tol), min(255, g + tol), min(255, rr + tol)], np.uint8)
+            import cv2
+            mask = cv2.inRange(img, lo, hi)
+            n, _, stats, cents = cv2.connectedComponentsWithStats(mask, 8)
+            best = max(range(1, n), key=lambda i: stats[i, cv2.CC_STAT_AREA], default=None)
+            area = int(stats[best, cv2.CC_STAT_AREA]) if best is not None else 0
+            if area >= int(r.get("min_area", 5000)):
+                cx, cy = cents[best]
+                return True, f"색 영역 {area}px @({int(cx) + ox},{int(cy) + oy})"
+            return False, ""
         if t == "no_signal":
             std = float(frame.std())
             return std < r.get("max_std", 2.0), f"std={std:.2f}"

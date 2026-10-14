@@ -43,6 +43,7 @@ class Locator:
         self.cfg = cfg
         self.log = log or (lambda m: None)
         self._ocr: Optional[OcrEngine] = None
+        self._last: dict = {}                       # 영역 없는 글자 대상의 직전 위치
 
     @property
     def ocr(self) -> OcrEngine:
@@ -94,6 +95,27 @@ class Locator:
             region = (a.box[0] + dx, a.box[1] + dy, w, h)
         if is_text_spec(spec) and spec.get("axis"):
             return self._axis(spec, frame, region)
+        if is_text_spec(spec) and region is None and not spec.get("vote"):
+            # 영역 없는 글자 대상: 직전에 찾은 위치 근처(작은 영역)부터 → 없으면 화면 전체 (창 위치가 바뀌어도 매번 전체 OCR 하지 않게)
+            key = repr(sorted(spec.items()))
+            last = self._last.get(key)
+            if last is not None:
+                x, y, w, h = last
+                near = (max(0, x - 120), max(0, y - 40), w + 240, h + 80)
+                hit = self.ocr.find_text(frame, spec["text"], region=near, mode=spec.get("match", "contains"),
+                                         min_ratio=spec.get("min_ratio", 0.9), scale=spec.get("scale"))
+                if hit is not None:
+                    self._last[key] = hit.box
+                    return Match(hit.box, hit.conf)
+            m = self._text(spec, target, frame, None)
+            if m is not None:
+                self._last[key] = m.box
+            return m
+        if is_text_spec(spec):
+            return self._text(spec, target, frame, region)
+        return self._template(target, spec, frame, region)
+
+    def _text(self, spec: dict, target: Target, frame: np.ndarray, region) -> Optional[Match]:
         if is_text_spec(spec):
             if region is None and not getattr(self, "_warned", {}).get(str(target)):
                 self._warned = {**getattr(self, "_warned", {}), str(target): True}
@@ -102,6 +124,9 @@ class Locator:
                                      min_ratio=spec.get("min_ratio", 0.9), scale=spec.get("scale"),
                                      line=spec.get("line"), vote=spec.get("vote", False))
             return Match(hit.box, hit.conf) if hit else None
+        return None
+
+    def _template(self, target: Target, spec: dict, frame: np.ndarray, region) -> Optional[Match]:
         tmpl = self.reg.template(target)
         if tmpl is None:
             raise FileNotFoundError(f"target '{target}' 템플릿 파일 없음")

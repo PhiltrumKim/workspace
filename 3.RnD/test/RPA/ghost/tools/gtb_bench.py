@@ -92,12 +92,14 @@ class Bench:
         return None, None
 
     # ------------------------------------------------------------ 측정
-    def run_style(self, style: str) -> dict:
-        print(f"\n=== 스타일 {style} ===")
-        sd = os.path.join(self.out, style)
+    def run_style(self, cond: str) -> dict:
+        """cond: 'native' / 'dark' / 'native@1.25' (스타일@화면 배율)."""
+        style, _, scale = cond.partition("@")
+        print(f"\n=== 조건 {cond} ===")
+        sd = os.path.join(self.out, cond.replace("@", "_x"))
         os.makedirs(sd, exist_ok=True)
-        rec = {"style": style, "tabs": {}, "launch_t": time.time()}
-        self.run_dialog(f'"{self.args.exe}" /user=operator /seed=1 /style={style}')
+        rec = {"style": style, "scale": float(scale or 1), "tabs": {}, "launch_t": time.time()}
+        self.run_dialog(f'"{self.args.exe}" /user=operator /seed=1 /style={style}' + (f" /scale={scale}" if scale else ""))
         self.park()
         f, hits = self.wait_for_text("Recipe Parameters", 25)
         if f is None:
@@ -122,7 +124,7 @@ class Bench:
                 found[label] = None if h is None else {"box": list(h.box), "center": list(h.center), "text": h.text,
                                                        "conf": h.conf, "mode": mode}
             tm = {}
-            if style == "native":
+            if style == "native" and not scale:
                 for key in TEMPLATE_KEYS:
                     if found.get(key) and key not in self.templates:
                         x, y, w, hh = found[key]["box"]
@@ -130,14 +132,16 @@ class Bench:
                         crop = f[max(0, y - pad):y + hh + pad, max(0, x - pad):x + w + pad].copy()
                         self.templates[key] = crop
                         cv2.imwrite(os.path.join(self.out, f"tpl_{key[:20].replace(' ', '_')}.png"), crop)
+            tms = {}
             for key, tpl in self.templates.items():
-                t0 = time.time()
-                m = matcher.find(f, tpl, threshold=0.0)
-                tm[key] = {"center": list(m.center), "box": list(m.box), "score": round(m.score, 3),
-                           "ms": round((time.time() - t0) * 1000)} if m else None
+                for out_, scales in ((tm, (1.0,)), (tms, (1.0, 1.25, 1.5))):     # 한 배율 / 여러 배율 매칭
+                    t0 = time.time()
+                    m = matcher.find(f, tpl, threshold=0.0, scales=scales)
+                    out_[key] = {"center": list(m.center), "box": list(m.box), "score": round(m.score, 3),
+                                 "scale": m.scale, "ms": round((time.time() - t0) * 1000)} if m else None
             rec["tabs"][tab] = {"t": time.time(), "ocr_s": ocr_s,
                                 "ocr": [{"text": h.text, "box": list(h.box), "conf": h.conf} for h in hits],
-                                "found": found, "template": tm}
+                                "found": found, "template": tm, "template_ms": tms}
             n_found = sum(1 for v in found.values() if v)
             print(f"  [{tab}] OCR {len(hits)}개 ({ocr_s}s), 글자 대상 {n_found}/{len(found)} 찾음, 템플릿 {len(tm)}개 시도")
         self.close_gtb()
@@ -178,7 +182,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config")
     p.add_argument("--exe", default="%USERPROFILE%\\Desktop\\dist\\GTB3000.exe")
-    p.add_argument("--styles", default="native,classic,flat,dark")
+    p.add_argument("--styles", default="native,classic,flat,dark", help="조건 목록. 화면 배율은 native@1.25 처럼")
     Bench(p.parse_args()).run()
 
 

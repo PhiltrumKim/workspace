@@ -151,3 +151,19 @@ def test_webhook_notification(cfg):
         assert got[0]["severity"] == "critical" and "GHOST" in got[0]["text"]
     finally:
         srv.shutdown()
+
+
+def test_color_rule_detects_red_banner():
+    """색 감시: 빨간 덩어리(알람 창 머리글)가 일정 크기 이상이면 appeared — 스타일·글자와 무관."""
+    import numpy as np
+    from ghost.surveillance import Surveillance, validate_rules
+    rules = [{"name": "red_alarm", "type": "color", "bgr": [30, 30, 200], "tol": 40, "min_area": 4000}]
+    assert validate_rules(rules) == [] and validate_rules([{"name": "x", "type": "color"}])
+    s = Surveillance(rules, None, {})
+    f = np.full((600, 800, 3), 240, np.uint8)
+    assert s.check(f) == []
+    f[100:146, 200:640] = (30, 30, 200)                      # 440x46 빨간 머리글
+    ev = s.check(f)
+    assert len(ev) == 1 and ev[0].kind == "appeared" and "@(419,122)" in ev[0].detail
+    f[100:146, 200:640] = 240
+    assert s.check(f)[0].kind == "cleared"

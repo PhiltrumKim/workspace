@@ -1,0 +1,10 @@
+{
+  "ghost": 1,
+  "name": "gtb_ack_alarm",
+  "description": "GTB-3000 알람 창 → '확인 (Acknowledge)' (측정 계속)",
+  "steps": [
+    { "action": "screenshot", "label": "alarm" },
+    { "action": "click", "target": { "text": "Acknowledge" }, "timeout": 10,
+      "expect": { "gone": { "text": "Acknowledge" }, "timeout": 8 }, "retry": 1 }
+  ]
+}

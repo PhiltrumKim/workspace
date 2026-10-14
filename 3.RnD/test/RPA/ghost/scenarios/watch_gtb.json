@@ -1,0 +1,7 @@
+{
+  "rules": [
+    { "name": "gtb_alarm", "type": "color", "bgr": [30, 30, 200], "tol": 40, "min_area": 8000,
+      "severity": "critical", "action": "handler", "handler": "gtb_ack_alarm",
+      "description": "GTB-3000 알람 창의 빨간 머리글 (스타일·창 위치와 무관, OCR 없이 빠름)" }
+  ]
+}

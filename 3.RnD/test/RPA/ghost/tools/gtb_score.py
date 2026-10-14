@@ -40,7 +40,11 @@ def load_truth(path: str):
         for row in csv.DictReader(f):
             ev, d = row["event"], row["detail"]
             if ev == "app_start":
-                style = dict(kv.split("=", 1) for kv in d.split(";") if "=" in kv).get("style")
+                kv = dict(kv.split("=", 1) for kv in d.split(";") if "=" in kv)
+                style = kv.get("style")
+                sc = float(kv.get("scale", "1") or 1)
+                if abs(sc - 1) > 0.01:
+                    style = f"{style}@{sc:g}"
             elif ev == "ui_begin":
                 tab = parse_detail(d).get("tab")
                 cur = blocks.setdefault(tab, [])
@@ -59,7 +63,16 @@ def inside(pt, r, margin=2) -> bool:
     return x - margin <= pt[0] <= x + w + margin and y - margin <= pt[1] <= y + h + margin
 
 
+SCREEN = (1920, 1040)                       # 작업 표시줄 위까지. 화면 밖 요소(배율로 커진 창)는 채점에서 뺌
+
+
+def on_screen(e) -> bool:
+    x, y, w, h = e["rect"]
+    return 0 <= x + w / 2 < SCREEN[0] and 0 <= y + h / 2 < SCREEN[1]
+
+
 def expected(elems: List[dict], label: str) -> List[dict]:
+    elems = [e for e in elems if on_screen(e)]
     q = normalize(label)
     exact = [e for e in elems if normalize(e["text"]) == q]
     return exact or [e for e in elems if q and q in normalize(e["text"])]
@@ -85,6 +98,7 @@ def score(bench_dir: str, logs_dir: str) -> dict:
     for style, rec in bench["styles"].items():
         tb = truths.get(style)
         res = {"text": {"correct": 0, "wrong": 0, "missing": 0}, "template": {"correct": 0, "wrong": 0, "missing": 0},
+               "template_ms": {"correct": 0, "wrong": 0, "missing": 0},
                "ocr_s": [], "details": []}
         if not tb or "tabs" not in rec:
             res["error"] = "정답 로그 없음" if not tb else rec.get("error", "측정 없음")
@@ -102,15 +116,16 @@ def score(bench_dir: str, logs_dir: str) -> dict:
                     if j != "correct":
                         res["details"].append({"tab": tab, "how": "글자", "label": label, "result": j,
                                                "got": hit and hit["text"], "at": hit and hit["center"]})
-            for key, m in (t.get("template") or {}).items():
-                pt = m["center"] if m and m["score"] >= TPL_THRESHOLD else None
-                j = judge(pt, key, elems)
-                if j != "no_truth":
-                    res["template"][j] += 1
-                    if j != "correct":
-                        res["details"].append({"tab": tab, "how": "그림", "label": key, "result": j,
-                                               "score": m and m["score"]})
-        for k in ("text", "template"):
+            for kind in ("template", "template_ms"):
+                for key, m in (t.get(kind) or {}).items():
+                    pt = m["center"] if m and m["score"] >= TPL_THRESHOLD else None
+                    j = judge(pt, key, elems)
+                    if j != "no_truth":
+                        res[kind][j] += 1
+                        if j != "correct" and kind == "template":
+                            res["details"].append({"tab": tab, "how": "그림", "label": key, "result": j,
+                                                   "score": m and m["score"]})
+        for k in ("text", "template", "template_ms"):
             n = sum(res[k].values())
             res[k]["n"] = n
             res[k]["rate"] = round(100.0 * res[k]["correct"] / n, 1) if n else None
@@ -122,14 +137,14 @@ def score(bench_dir: str, logs_dir: str) -> dict:
 def main():
     bench_dir, logs_dir = sys.argv[1], sys.argv[2]
     r = score(bench_dir, logs_dir)
-    print(f"{'스타일':<8} {'글자 찾기':>18} {'그림 찾기':>18} {'OCR 1화면':>10}")
+    print(f"{'조건':<12} {'글자 찾기':>18} {'그림(1배율)':>18} {'그림(여러 배율)':>18} {'OCR 1화면':>10}")
     for style, s in r["styles"].items():
         if "error" in s:
             print(f"{style:<8} {s['error']}")
             continue
-        t, m = s["text"], s["template"]
-        print(f"{style:<8} {t['rate']:>6}% ({t['correct']}/{t['n']}, 오 {t['wrong']}) "
-              f"{(m['rate'] if m['rate'] is not None else '-'):>6}% ({m['correct']}/{m['n']}, 오 {m['wrong']}) {s['ocr_avg_s']:>8}s")
+        t, m, ms = s["text"], s["template"], s["template_ms"]
+        fmt = lambda r: f"{(r['rate'] if r['rate'] is not None else '-'):>6}% ({r['correct']}/{r['n']}, 오 {r['wrong']})"
+        print(f"{style:<12} {fmt(t)} {fmt(m)} {fmt(ms)} {s['ocr_avg_s']:>8}s")
         for d in s["details"][:12]:
             print("   ", d)
     with open(os.path.join(bench_dir, "score.json"), "w", encoding="utf-8") as f:
