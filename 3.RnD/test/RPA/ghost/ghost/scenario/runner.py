@@ -352,6 +352,7 @@ class Runner:
             raise
         ox, oy = st.get("offset") or rec.get("click_offset", (0, 0))     # offset: 대상 중심에서 떨어진 곳 (글자 옆 입력칸 등)
         cx, cy = m.center
+        self._pt_h = m.box[3]                      # 찾은 대상 높이 (작으면 클릭 전에 커서 위치를 꼭 확인)
         return (cx + ox, cy + oy), f"{tdesc(t)}@({cx + ox},{cy + oy}) score={m.score}"
 
     def _read(self, st: dict, res: RunResult) -> str:
@@ -571,10 +572,15 @@ class Runner:
         a = st["action"]
         d = self.dev
         if a in model.POINTER:
+            self._pt_h = None
             (x, y), where = self._point(st)
+            # 표 한 줄(23px)처럼 작은 대상: 확인을 건너뛴 이동의 몇 px 오차로 옆 줄을 누를 수 있음 → 이번 이동은 꼭 실측
+            small = self._pt_h is not None and self._pt_h < self.cfg["cursor"].get("precise_below", 30)
             if a == "move":
-                d.move_to(x, y)
+                d.move_to(x, y, verify=True if small else None)
             else:
+                if small:
+                    d.move_to(x, y, verify=True)
                 d.click(x, y, button=RIGHT if a == "right_click" else LEFT, double=(a == "double"))
             return where
         if a == "scroll":

@@ -16,11 +16,13 @@
     { "action": "type", "text": "%USERPROFILE%\\Desktop\\dist\\GTB3000.exe /user=operator ${args}" },
     { "action": "key", "key": "enter", "label": "GTB-3000 실행" },
     { "action": "wait_for", "target": { "text": "Recipe Parameters" }, "timeout": 40, "label": "레시피 화면 (창 위치 무관)" },
+    { "action": "click", "target": { "text": "GTB-3000 Analyzer" }, "timeout": 30, "label": "GTB 창을 맨 앞으로 (다른 창이 가리지 않게)" },
 
     { "action": "double", "target": { "text": "${recipe}", "match": "exact" }, "timeout": 15, "label": "레시피 더블클릭",
       "expect": { "visible": { "text": "불러오시겠습니까" }, "timeout": 10 }, "retry": 1 },
+    { "action": "expect", "target": { "text": "레시피 ${recipe}" }, "timeout": 5, "label": "확인 창의 레시피 번호가 맞는지 ('예' 누르기 전에)" },
     { "action": "key", "key": "y", "label": "불러오기 '예'", "expect": { "gone": { "text": "불러오시겠습니까" }, "timeout": 10 } },
-    { "action": "expect", "target": { "text": "Loaded: ${recipe}" }, "timeout": 8, "label": "불러온 레시피 확인" },
+    { "action": "wait_for", "target": { "text": "Recipe: ${recipe}" }, "timeout": 20, "label": "불러온 레시피 확인 (상태 줄: 어두운 스타일에서도 대비가 좋음)" },
 
     { "action": "click", "target": { "text": "LOT ID", "match": "exact" }, "offset": [220, 0], "timeout": 10, "label": "LOT 입력칸 (글자 오른쪽)" },
     { "action": "key", "key": "home" },
@@ -30,7 +32,9 @@
     { "action": "click", "target": { "text": "Apply Parameters" }, "timeout": 10, "label": "파라미터 적용" },
     { "action": "wait", "sec": 1.5, "label": "응답 지연 대비" },
 
-    { "action": "click", "target": { "text": "Start" }, "timeout": 10, "label": "측정 시작 (툴바)" },
+    { "action": "click", "target": { "text": "GTB-3000 Analyzer" }, "timeout": 10, "label": "시작 전에 GTB 창을 맨 앞으로" },
+    { "action": "click", "target": { "text": "Start" }, "timeout": 10, "label": "측정 시작 (툴바)",
+      "expect": { "gone": { "text": "Recipe Parameters" }, "timeout": 10 }, "retry": 2 },
     { "action": "wait_for", "target": { "text": "측정이 완료되었습니다" }, "timeout": 180, "label": "측정 완료 대기 (알람은 감시가 처리)" },
     { "action": "read", "name": "value", "anchor": { "text": "마지막 결과" }, "offset": [-6, -6, 420, 34],
       "pattern": "결과\\s*[:;]?\\s*([-0-9.]+)", "label": "완료 창의 측정값 판독" },
