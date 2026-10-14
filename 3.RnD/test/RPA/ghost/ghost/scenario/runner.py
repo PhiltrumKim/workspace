@@ -207,7 +207,8 @@ class Runner:
         x, y, w, h = hit
         gap = mg + 30
         for px, py in ((cx, y + h + gap), (cx, y - gap), (x + w + gap, cy), (x - gap, cy)):
-            if 10 <= px < W - 10 and 10 <= py < H - 10:
+            # 작업 표시줄(아래 50px)은 피함: 올리면 미리 보기 창이 뜨고, 오른쪽 끝은 '바탕 화면 보기'(Aero Peek)가 켜져 창이 투명해짐
+            if 10 <= px < W - 10 and 10 <= py < H - self.cfg["cursor"].get("taskbar_h", 50):
                 self.dev.move_to(px, py, verify=False)
                 time.sleep(self.cfg["timing"]["capture_latency"])
                 return True

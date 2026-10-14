@@ -60,7 +60,7 @@ class Bench:
         d.press("enter")
 
     def park(self) -> None:
-        self.dev.move_to(1900, 1060)                # 커서가 글자를 가리지 않게
+        self.dev.move_to(1910, 540)                 # 커서를 오른쪽 가장자리로 (오른쪽 아래 모서리는 Win7 '바탕 화면 보기' — 창이 투명해짐)
 
     def frame(self):
         time.sleep(0.4)

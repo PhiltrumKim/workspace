@@ -134,7 +134,7 @@ class Bench:
 
     def click_at(self, x, y):
         self.dev.click(x, y)
-        self.dev.move_to(1880, 1040, verify=False)      # 커서가 글자를 가리면 OCR 이 'I'·숫자 오판
+        self.dev.move_to(1910, 540, verify=False)       # 커서가 글자를 가리면 OCR 이 'I'·숫자 오판 (작업 표시줄·모서리는 피함)
 
     def click_input(self):
         x, y, w, h = self.reg["input"]
